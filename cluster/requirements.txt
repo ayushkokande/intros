@@ -1,0 +1,13 @@
+# Only needed if you build a separate overlay (cluster/01_setup_overlay.sh).
+# The probe_conf overlay already satisfies these.
+torch>=2.6,<3
+transformers==5.17.0
+huggingface-hub>=0.30
+accelerate==1.15.0
+safetensors==0.8.0
+numpy==2.5.3
+pandas==3.0.6
+matplotlib==3.11.2
+pytest==9.1.1
+# optional, for --quant 8bit/4bit:
+# bitsandbytes

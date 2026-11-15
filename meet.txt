@@ -1,0 +1,227 @@
+Regex grammar inference and model introspection with Krishna
+Regex Grammar Inference: Core Idea and Motivation
+Proposed as a structured analog to Atkinson’s preference introspection setup
+
+Same two-level architecture: a base task and an emergent meta-task, never explicitly trained on
+
+Motivation: Atkinson’s coefficient task has no difficulty axis; regex grammars allow explicit control over complexity
+
+Could generalize beyond regex: context-free grammars, decision trees, polynomial functions, or any well-defined rule class with a checkable meta-answer
+
+Concrete setup:
+
+Define N regex grammars (e.g., 10), never revealed to the model
+
+Generate accepted and rejected strings for each grammar
+
+Fine-tune the model on examples of the form: “G1 accepts {a, b, c}, rejects {d, e, f}”
+
+Level-0 task: given a new string, predict whether G1 accepts or rejects it
+
+Level-1 meta-task: without any new examples, ask “what is G1?” and evaluate whether the verbalized rule is consistent with the model’s level-0 choices
+
+No exact match required for the meta-task answer
+
+Multiple valid regex representations exist for the same language
+
+Consistency with all positive and negative examples seen during training is the success criterion
+
+Model gets credit as long as the reported grammar agrees with its own acceptance decisions on held-out strings
+
+Why regex specifically: it is the simplest, most controlled testbed for structured rule induction
+
+Difficulty is tunable: simple character classes vs. complex alternations, quantifiers, nested groups
+
+The paradigm is general: the “rule” does not have to be a regex; anything with a well-defined meta-task and a checkable answer qualifies
+
+Math tasks (e.g., GSM, polynomial functions) were discussed as alternatives
+
+Polynomial functions noted as potentially clean: level-0 is evaluating the function, level-1 is reporting the polynomial
+
+GSM rejected because the meta-task is not well-defined: unclear what “level-1” means for a general math problem
+
+Key requirement for any candidate task: a clear answer to the meta-task and a clear way to check that the meta-answer is consistent with level-0 choices
+
+Comparison to Atkinson’s Preference Introspection
+Atkinson’s setup (the “Identify Introspection” paper):
+
+Hidden rule: linear regression weights over item attributes
+
+Level-0 task: predict whether an entity prefers item A or B (buy/not buy)
+
+Level-1 meta-task: report the coefficients that govern the preference
+
+Evaluation: correlation between reported and true coefficients, averaged across many queries
+
+Note: the model never gives the right coefficients in a single query; the signal emerges from averaging
+
+The buy/not-buy choice task itself originates from an earlier paper (possibly Georgia Morales et al.); Atkinson’s contribution is layering the introspection meta-task on top
+
+Regex analog maps directly:
+
+Hidden rule: the regex grammar
+
+Level-0 task: string acceptance or rejection
+
+Level-1 meta-task: verbalize the grammar rule
+
+Key structural difference: Atkinson relies on averaging over continuous coefficients; no clear correlation-based equivalence measure exists for discrete grammar descriptions
+
+This is an open problem: need to find or define a consistency or equivalence metric for regex outputs
+
+One direction: behavioral equivalence, i.e., check whether the reported grammar accepts and rejects exactly the same strings as the training examples, rather than requiring syntactic match
+
+Whether a correlation-like aggregate measure exists for grammars needs to be investigated before committing to this testbed
+
+Regex setting is considered harder and more structured than the coefficient task
+
+The coefficient task has a single scalar difficulty (number of attributes); grammar complexity is multi-dimensional
+
+The paradigm is also more general: the “rule” does not have to be a regex; anything with a well-defined meta-task and a checkable answer qualifies
+
+Related Work: Hidden Rule Verbalization
+Two relevant 2024 papers found via Claude search; both do something structurally similar to the proposed experiment
+
+Paper 1 (classification with a hidden rule):
+
+Model prompted with: “there is a hidden classification rule; label new examples accordingly”
+
+Fine-tuned on labeled examples; an articulation task is added separately, asking the model to state the rule
+
+Result: strong models succeed at articulation to some extent; weaker models do not
+
+Framing: level-0 is classification, level-1 is articulation of the decision boundary
+
+Observation: papers that use the word “introspection” in their framing tend to define it differently from the Atkinson-style setup; the Atkinson framing is more precise about what the meta-task is and how to evaluate it
+
+Paper 2 (“Connecting the Dots,” more cited, same authors as Paper 1):
+
+Fine-tuned on implicit relational facts: e.g., “the distance between city X and Istanbul is 2,300 km”
+
+Meta-task: identify the city from indirect relational evidence (answer: Paris, therefore France)
+
+Suggests the model can recover hidden identity from indirect relational evidence without being told the answer explicitly
+
+Noted as likely capturing the same underlying phenomenon as the preference introspection work
+
+Both papers support the hypothesis that the regex experiment is feasible and that the phenomenon is real across task types
+
+Neither paper is an exact match to the proposed setup; the regex framing is more structured and the evaluation criterion (consistency vs. correlation) is different
+
+The existence of these papers also suggests the proposed work should be positioned carefully to distinguish its contribution from what has already been shown
+
+Word2Vec Mechanism Proposal and Theoretical Framing
+Proposal to build a simple, interpretable model (Word2Vec or a variant) that reproduces the introspection phenomenon
+
+Goal: show that implicit encoding of a rule in subject embeddings is expected even for simple associative models, not just large language models
+
+Two-part claim to establish:
+
+The rule (preference, grammar, etc.) is encoded in the embeddings after training on level-0 examples
+
+The encoded information can be verbalized, i.e., recovered in natural language at the meta-task level
+
+The encoding part is noted as “not completely obvious” even for simple models; showing it is expected is itself a contribution
+
+The verbalization step is considered the more surprising and harder-to-explain part; this is where the main explanatory burden lies
+
+Pre-training vs. fine-tuning split proposed for the generative story:
+
+Pre-training stage: instill the meaning of preference or rule-following through auxiliary data
+
+Example data: entity mentions alongside attribute descriptions, in proportion to how much the entity “cares” about the attribute
+
+Simulates how language models acquire the concept of preference from raw text (e.g., “this apartment has X, Y, Z; I prefer Y”)
+
+Two types of pre-training data proposed: (1) entity chooses between two options, as in fine-tuning; (2) entity talks about the attribute it cares about, in proportion to how much it cares
+
+The second type is closer to what pre-training corpora actually contain
+
+Fine-tuning stage: train on binary choice examples (accept/reject, buy/not buy)
+
+Word2Vec alone is insufficient: needs grounding data to give numerical or preference meaning to the embeddings; cannot train on the task data alone
+
+Augmentation idea: for some fraction of training examples, also provide the meta-task answer
+
+e.g., for 50 of 100 grammars, also provide the verbalized rule; for the remaining 50, do not
+
+Tests whether partial supervision on the meta-task transfers to unsupervised cases
+
+Related to what the “Connecting the Dots” paper does with zero-shot vs. supervised articulation
+
+Verbalization definition is an open problem for the Word2Vec model
+
+Logic Lens was mentioned as a potential tool but noted as unlikely to work in this setting
+
+Additional data or a separate verbalization module may be needed
+
+Broader theoretical ambition: characterize when model self-reports can be trusted
+
+General framing: given a hidden rule that governs a classification task, and training only on examples that express the rule implicitly, when does the model acquire the ability to faithfully report the rule?
+
+Likely task-specific: the conditions under which it works will vary by rule type, model size, and training distribution
+
+Possible contribution: not a full general theory, but a characterization across a defined set of structured tasks
+
+Noted as potentially “too optimistic” as a general claim, but worth attempting to capture even a subset of cases
+
+Emergent Introspection and Training Data Hypothesis
+Observation from Atkinson’s results: the introspection effect appears at 32B scale
+
+Hypothesis: smaller models also show the effect but negatively (anti-correlated or suppressed), not simply absent
+
+This emergence pattern could be explored using the regex testbed, where scale effects are easier to isolate
+
+Hypothesis about why self-reports work on the preference task but not others:
+
+The “comfortable housing” preference is likely well-represented in pre-training data (e.g., apartment listings, buyer reviews)
+
+This coverage may explain why the model can self-report on this task specifically
+
+If true, the effect is not a general introspection capability but a task-specific artifact of training data distribution
+
+Proposed follow-up: use agents to search training data for instances of the relevant preference or rule type
+
+Described as “the dumbest thing” that could work: multiple agents scan training data for examples like “person buying a house, expressing preferences”
+
+Goal: verify that task-specific self-report success is explained by training data coverage
+
+Acknowledged as difficult to trace rigorously, and the model’s generalization to new entities remains the core result regardless
+
+Even if training data instances are found, the performance on new entities is still non-trivial and worth reporting
+
+Worth attempting if the search is cheap; not a blocker for the main experiment
+
+Next Steps and Communication
+Ayush to draft 2-3 paragraphs in a Google Doc outlining the regex experiment plan
+
+Should cover: task and meta-task setup, how grammars are generated, evaluation criteria for level-0 and level-1, and the consistency check methodology
+
+Share with the group before starting implementation; if the plan looks good, proceed to experiments
+
+The write-up is also a way to check whether the experimental design is well-defined enough to proceed
+
+Longer-term: aim to propose a small workshop paper once the experiment plan and initial results are in place
+
+Slack workspace set up for the group during the meeting
+
+Previous Slack channel had expired
+
+Krishna (KK6081) invited to a shared workspace; confirmed working by end of meeting
+
+External workspace connections require a Pro subscription; a workaround was found in this case
+
+Email chain proposed as a fallback if Slack coordination becomes difficult
+
+Action Items
+Draft regex experiment plan in Google Doc (Ayush)
+
+Cover task/meta-task setup, grammar generation, level-0 and level-1 evaluation criteria, and the consistency check; share with the group before starting implementation.
+
+Investigate consistency metric for regex meta-task evaluation
+
+Atkinson uses coefficient correlation; need an analogous measure for discrete grammar descriptions, likely behavioral equivalence over accepted and rejected strings.
+
+Assess feasibility of training data search for preference instances
+
+Determine whether agents can cheaply find task-relevant preference data (e.g., house-buying documents) to test the hypothesis that training data coverage explains task-specific self-report success.
