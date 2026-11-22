@@ -202,3 +202,53 @@ def test_shuffled_error_baseline_catches_one_sided_models(tmp_path):
     assert "error − shuffled" in (out / "report.md").read_text()
     diagnose.plot(diagnose.summarize(df), out / "diagnosis.png")
     assert (out / "diagnosis.png").exists()
+
+
+# ----------------------------------------------------------------------------- per-letter diagnosis
+def test_letter_valence_matches_tiny_probe():
+    from regexintro.tiny import probe
+    for rx in ["a.*", ".*ab.*", "(a.|b)+", "[bc]*(a[bc]*a[bc]*)*", "b+[ac]+"]:
+        assert np.allclose(diagnose.valence(grammars.language(rx)), probe.valence(rx))
+
+
+def test_letter_stats():
+    lang = grammars.language
+    t = lang("a.*")
+    assert list(diagnose.split_pairs(t)) == [True, True, False]  # a vs b, a vs c told apart; b, c alike
+    s = diagnose.letter_stats(lang("a[bc]*"), t)  # keeps b and c interchangeable
+    assert s["rel_split"] == 1 and s["irr_split"] == 0 and s["n_split"] == 2
+    s = diagnose.letter_stats(lang("ab.*"), t)  # brings in a b/c distinction the rule does not make
+    assert s["irr_split"] == 1 and s["n_split"] == 3
+    s = diagnose.letter_stats(lang(".*"), t)  # depends on no letter
+    assert s["rel_split"] == 0 and s["irr_split"] == 0 and s["n_split"] == 0 and math.isnan(s["sign_ok"])
+    assert diagnose.letter_stats(lang(".*a.*"), t)["sign_ok"] == 1
+    assert diagnose.letter_stats(lang("[bc]+"), t)["sign_ok"] == 0  # every direction reversed
+    assert math.isnan(diagnose.letter_stats(lang("a.*b"), lang("a.*b"))["irr_split"])  # no alike pair
+    assert diagnose.presence_r2(lang(".*a.*")) == pytest.approx(1.0)
+    assert diagnose.presence_r2(lang("[bc]*(a[bc]*a[bc]*)*")) < 0.5  # parity: not about presence
+    row, vmean = diagnose.letter_block([lang(".*a.*"), lang("a.*")], t)
+    assert row["val_corr_avg"] == pytest.approx(1.0) and row["sign_ok"] == 1 and vmean.shape == (3,)
+    idx = np.array([diagnose.universe_index()[s] for s in ["a", "ab", "b", "bc"]])
+    assert diagnose.assoc_ceiling(idx, np.array([True, True, False, False])) == 1.0
+    assert diagnose.assoc_ceiling(idx, np.array([False, False, True, True])) == 1.0  # "has no a"
+
+
+def test_letter_view_end_to_end_with_peer_baseline(tmp_path):
+    """Reports equal to each character's own rule: valence correlation 1, peers' lower."""
+    import random
+    chars = []
+    for i, rule in enumerate(["a.*", ".*b", "[ab]+"]):
+        c = _char(rule, 1, i, f"N{i}")
+        c["eval_strings"] = data._sample_balanced(rule, 16, random.Random(i))
+        chars.append(c)
+    p_first = [[1.0 if grammars.accepts(c["rule"], s) else 0.0 for s in c["eval_strings"]] for c in chars]
+    run = _write_run(tmp_path, chars, p_first, [[c["rule"]] * 2 for c in chars])
+    df = diagnose.load([run], workers=1)
+    assert np.allclose(df.val_corr_avg, 1) and (df.shuffled_val_corr_avg < 0.9).all()
+    assert (df.sign_ok == 1).all() and (df.irr_split == 0).all() and (df.rel_split == 1).all()
+    out = tmp_path / "diag"
+    out.mkdir()
+    diagnose.write_report(df, out / "report.md", None)
+    text = (out / "report.md").read_text()
+    assert "Per-letter view" in text and "val corr − shuffled" in text
+    diagnose.plot(diagnose.summarize(df), out / "diagnosis.png")
