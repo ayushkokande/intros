@@ -42,11 +42,12 @@
 - **Ports of Keshav's other experiments** (new files only; existing `regexintro/` modules untouched while jobs import them):
   - conflict test: `regexintro/conflict.py`, `conflict_analyze.py`, `cluster/regex/40`, `41`
   - explicit-rule check: `regexintro/explicit.py`, `cluster/regex/60`
-  - report diagnosis with the shuffled error-string baseline: `regexintro/diagnose.py`, `cluster/regex/35`
+  - report diagnosis with the shuffled error-string baseline and a per-letter view (regex version of Keshav's attribute diagnosis: sign_ok, rel/irr_split by letter-swap symmetry, valence correlation with shuffled baseline, assoc_ceiling, presence_r2): `regexintro/diagnose.py`, `cluster/regex/35`
   - template identification helper: `regexintro/families.py`
   - from-scratch GPT-2 sandbox: `regexintro/tiny/`, `cluster/regex/50`, `51`
   - tests: `tests/test_regex_extras.py`, `tests/test_regex_tiny.py`; 115 pass on the Mac
-  - Shipped to Torch as `~/Desktop/regexintro-ports.tar.gz` (20 new files), which the user uploads.
+  - On Torch via `git restore --source=fork/regex-variant --worktree` (remote `fork` = the user's fork); 115 tests pass in the container.
+  - Submitted 2026-11-22 ~18:30: explicit `24130435` (starts 10 min after L4 train starts), tiny `24130436_[0-2]`, tiny sweep `24130438_[0-5]`, diagnose `24130439` (after all eval), conflict `24130440_[1-4]` (aftercorr eval), conflict analyze `24130441`.
 - Not ported: Word2Vec (no code in the repo). Longer L3/L4 training is a config change (`TRAIN_ARGS="--steps 12000" ARRAY=3-4`) to decide after the results.
 - Deferred until eval finishes: making the parser strip `^`/`$` anywhere (would change `grammars.py`), then `regexintro.rescore`.
 - Reading results: error-string faithfulness and faith − base are inflated when the model is one-sided (low accept rate). Use balanced faithfulness and `diagnose`'s shuffled error baseline.
