@@ -1,0 +1,49 @@
+# Paper Overview: Introspection Study
+
+- Paper tests whether LLMs can infer and report latent preference weights from decision data
+- Setup: synthetic characters (e.g., “Gregor”) assigned hidden preference vectors over features (e.g., area vs. windows)
+  - Model only sees option A, option B, character chose A, never the raw preference vector
+  - Two metrics tracked: learning latent preferences (yellow curve) and verbalizing learned rules (green curve)
+- Two key properties measured: groundedness and faithfulness
+  - Paper only tests groundedness; faithfulness emerges much later in training
+  - Weaker models (~0.6B params) show near-zero or negative faithfulness
+
+# Word2Vec Replication Hypothesis
+
+- Hypothesis: introspection-like phenomena can be replicated in much simpler models, not just large LLMs
+- Built a Word2Vec model trained on similarly formatted preference data
+  - Word2Vec is not contextualized, so training format needed minor modification
+  - Core data structure preserved: preference pairs derived from a latent weight vector
+- Key result: entity embeddings (e.g., for “Gregor”) linearly encode the latent preference vector P
+  - Model never directly sees P, only the decisions derived from P
+  - Linear encoding is non-trivial and matches the paper’s findings
+- Reporting analog: dot product between entity embedding and candidate phrase embeddings recovers preference weights
+  - Positive correlation observed between true weights and recovered weights
+  - Preliminary, but consistent with the paper’s introspection claims
+
+# Implications and Research Direction
+
+- If Word2Vec replicates the phenomenon, it demystifies the paper’s claims
+  - Not evidence of deep introspection; likely driven by training data associations
+  - Even very weak models exhibit it, so it shouldn’t be treated as a marker of self-awareness
+- Word2Vec is far more analytically tractable than LLMs
+  - Mechanisms understood in Word2Vec can generate testable hypotheses for LLMs
+  - E.g., test whether LLM entity representations also linearly encode latent weights
+- Negative introspection in weak models may reflect subspace inversion
+  - Model detects the correct encoding direction but reads it in reverse
+
+# Difficulty Signal and RL Objective
+
+- Idea floated: incorporate a difficulty signal into an RL objective for introspection
+- Two candidate difficulty proxies discussed:
+  - Model predicting the regex underlying a decision
+  - Depth of a decision tree replacing the random linear map used in the paper
+- Shashwat’s original regex idea wasn’t fully understood; need to loop him in
+
+# Next Steps
+
+- Meet with Shashwat (also referred to as Sascha/Joshua) around 5 PM today to clarify his regex idea and align on direction
+- Re-read the paper thoroughly before the 5 PM meeting
+
+- **Re-read the paper before 5 PM today (9th November)**
+- **Arrange 5 PM sync with Shashwat**

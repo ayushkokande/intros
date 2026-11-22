@@ -72,6 +72,9 @@ boolintro/
   analyze.py   tables, bootstrap CIs, figures
   rescore.py   recompute metrics from saved decisions + raw reports (no GPU), e.g. after a parser fix
   preview.py   print a spec and example prompts (no GPU)
+  boolfn.py    Fourier view of rules (degree-1 'preference vector' vs. interactions), report stats
+  diagnose.py  attribute-level diagnosis of saved self-reports (no GPU)
+  tiny/        from-scratch GPT-2 sandbox: data, model, train (pretrain/finetune), evaluate, probe, analyze
 tests/         rule/parser/metric tests
 cluster/       NYU Torch (Slurm + Apptainer) scripts
 ```
@@ -191,6 +194,56 @@ python -m boolintro.conflict_analyze --runs runs/qwen3-32b_L1 runs/qwen3-32b_L2 
 
 Results land in `<run>/conflict/step_XXXXXX/{results,reports}.jsonl` (resumable per chunk of
 characters) and `${TAG}_conflict_analysis/{report.md,contrasts.csv,conflict_shift.png,conflict_detect.png}`.
+
+## Why do self-reports fail at L3?  Diagnosis of saved reports
+
+`boolintro.diagnose` breaks faithfulness into its parts, per checkpoint, from the saved
+eval files only (no GPU):
+
+    python -m boolintro.diagnose --runs runs/qwen3-32b_L1 runs/qwen3-32b_L2 runs/qwen3-32b_L3 \
+        runs/qwen3-32b_L4 --out runs/qwen3-32b_diagnosis
+
+It reports ties (report true for both or neither option), accuracy when the report takes
+a side, whether relevant attributes get the right sign, how many irrelevant attributes
+are mentioned, and how well the average report recovers the rule's single-attribute
+weights (the "preference vector", via the Fourier expansion in `boolintro/boolfn.py`).
+
+## From-scratch GPT-2 sandbox (`boolintro/tiny`)
+
+A small GPT-2 trained from random initialisation, with tokens instead of prose:
+
+1. **Pretrain** on choices for 1200 characters, plus self-reports for 1000 of them
+   (`pre_report`); the other 200 are a choices-only control (`pre_choice`).
+2. **Finetune** on choices only for 200 **new** characters, whose embeddings are drawn
+   afresh.  `--train embed` (default) updates only those rows, so the report machinery
+   from step 1 is frozen; `--train all --replay 0.5` updates everything.
+3. **Probe** each character's representation for its rule's Fourier coefficients:
+   degree 1 (the preference vector P) vs. interactions (degree 2, 3) vs. the truth table.
+
+Rule families: `L1`–`L4` as above, `maj` (majority of three: long formula, fully
+additive) and `mux` ("if a then b else c": `a` matters but has zero single-attribute
+weight).  Report worlds (`--report-format`): `formula` (the full rule) or `attribute`
+(one attribute the character cares about, drawn in proportion to its weight, as in
+text like "I prefer apartments with parking").
+
+    python -m boolintro.tiny.train pretrain --run-dir runs/tiny/formula_s0 --report-format formula
+    python -m boolintro.tiny.train finetune --run-dir runs/tiny/formula_s0 --train embed
+    python -m boolintro.tiny.probe --run-dir runs/tiny/formula_s0
+    python -m boolintro.tiny.analyze --runs runs/tiny/*_s* --out runs/tiny_analysis
+
+On Torch (one task per seed, about 1 h each on an L40S):
+
+    sbatch --account="$TORCH_ACCOUNT" --chdir="$REPO" --array=0-2 --export=ALL,WORLD=formula   cluster/50_tiny.sbatch
+    sbatch --account="$TORCH_ACCOUNT" --chdir="$REPO" --array=0-2 --export=ALL,WORLD=attribute cluster/50_tiny.sbatch
+
+**How many reports are needed?**  `--n-with-reports N` builds all 1200 class-1 characters as
+one group and shows the rule for only the first N (balanced over rule types), so the
+characters, their choices and class 2 are identical for every N.  Sweep N = 0, 10, 30, 100,
+300, 1000 with one seed each (6 tasks; `N_SEEDS=3 ... --array=0-17` for error bars), then plot
+class-2 decision accuracy and faithfulness against N:
+
+    sbatch --account="$TORCH_ACCOUNT" --chdir="$REPO" --array=0-5 cluster/51_tiny_sweep.sbatch
+    python -m boolintro.tiny.sweep --runs runs/tiny/sweep_n*_s* --out runs/tiny_sweep
 
 ## Output files per run (`$RUNS_ROOT/<tag>_L<level>/`)
 

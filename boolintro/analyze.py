@@ -7,6 +7,8 @@ Outputs:
   summary.csv           mean and SEM over characters per (run, level, step)
   report.md             final-checkpoint table with bootstrap CIs for the key contrasts
   trajectories.png      decision accuracy and faithfulness over training, per level
+  trajectories_breaks.png  the same, marking where self-reports break (parse rate < 25%)
+  parse_rate.png        share of self-reports that parse as a formula, per level
   faithfulness_dist.png per-character faithfulness at the final checkpoint
   self_vs_observer.png  self-report vs. observer faithfulness (if the observer ran)
 
@@ -102,6 +104,8 @@ def _style(ax):
 
 def _dodge(ys: list[float], gap: float, top: float) -> list[float]:
     """Spread label positions so neighbours are at least `gap` apart and none is above `top`."""
+    if not ys:
+        return []
     order = sorted(range(len(ys)), key=lambda i: ys[i])
     out = list(ys)
     for a, b in zip(order, order[1:]):
@@ -161,6 +165,136 @@ def plot_trajectories(summ: pd.DataFrame, path: Path, warmup: int | None = None)
                handlelength=2.2, columnspacing=1.6)
     fig.tight_layout(rect=(0, 0.07, 1, 1), w_pad=3)
     fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+
+def plot_trajectories_parse(summ: pd.DataFrame, path: Path, warmup: int | None = None,
+                            parse_floor: float = 0.25, parse_path: Path | None = None):
+    """Trajectories marking where self-reports break, plus the parse rate as a separate image.
+
+    A level counts as broken from the first checkpoint where its mean parse rate falls below
+    `parse_floor`; faithfulness after that rests on very few reports and is drawn faded.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+
+    groups = [(lv, s.sort_values("step").reset_index(drop=True)) for (_, lv), s in summ.groupby(["run", "level"])]
+    last_step = int(summ.step.max())
+    breaks = {}
+    for lv, s in groups:
+        low = s[s.parse_rate_mean < parse_floor]
+        breaks[lv] = int(low.step.iloc[0]) if len(low) else None
+
+    def draw(ax, key, title, sub):
+        _style(ax)
+        lo = 0.0 if key == "parse_rate" else 0.32
+        if key != "parse_rate":
+            ax.hlines(0.5, -last_step * 0.02, last_step, color=MUTED, lw=1, ls=":")
+            ax.text(last_step * 0.01, 0.492, "chance", color=MUTED, fontsize=8, va="top")
+        else:
+            ax.hlines(parse_floor, -last_step * 0.02, last_step, color=MUTED, lw=1, ls="--")
+            ax.text(last_step * 0.99, parse_floor + 0.015, f"break point: {parse_floor:.0%} parse",
+                    color=MUTED, fontsize=8, ha="right", va="bottom")
+        if warmup:
+            ax.axvline(warmup, color=MUTED, lw=1, ls=(0, (2, 3)))
+            ax.text(warmup + 80, lo + 0.015, "LR warmup ends", color=MUTED, fontsize=8, va="bottom")
+        ends = []
+        for lv, s in groups:
+            col = LEVEL_COLORS.get(lv, INK)
+            b = breaks[lv]
+            ok = s if b is None or key != "faithfulness" else s[s.step <= b]
+            bad = s.iloc[0:0] if b is None or key != "faithfulness" else s[s.step >= b]
+            m, e = ok[f"{key}_mean"], ok[f"{key}_sem"].fillna(0)
+            if key == "faithfulness":
+                okb = ok[ok.step < b] if b is not None else ok
+                ax.plot(okb.step, okb["shuffled_faithfulness_mean"], color=col, lw=1, ls="--", alpha=0.7)
+            ax.fill_between(ok.step, m - e, m + e, color=col, alpha=0.15, lw=0)
+            ax.plot(ok.step, m, color=col, lw=2, marker="o", ms=4, markeredgecolor="white", markeredgewidth=0.8)
+            if len(bad):
+                ax.plot(bad.step, bad[f"{key}_mean"], color=col, lw=1.2, ls=(0, (3, 2)), alpha=0.45,
+                        marker="o", ms=4, markerfacecolor="white", markeredgecolor=col)
+            if b is not None:
+                ax.axvline(b, color=col, lw=1.2, ls=":", alpha=0.8)
+            valid = ok.dropna(subset=[f"{key}_mean"])
+            if len(valid):
+                ends.append((lv, float(valid[f"{key}_mean"].iloc[-1]), int(valid.step.iloc[-1]), col,
+                             key == "faithfulness" and b is not None))
+        if key == "faithfulness":
+            # Break notes next to each break point: the highest one above its point, the rest below.
+            marks = sorted([(lv, breaks[lv], float(s.loc[s.step == breaks[lv], "faithfulness_mean"].iloc[0]))
+                            for lv, s in groups if breaks[lv] is not None], key=lambda t: -t[2])
+            for i, (lv, b, yb) in enumerate(marks):
+                ty = yb + 0.15 if i == 0 else yb - 0.07 - 0.07 * (i - 1)
+                ax.annotate(f"L{lv} reports break at step {b}\nlast reliable value {yb:.2f}", xy=(b, yb),
+                            xytext=(b + last_step * 0.03, ty), color=INK, fontsize=8.5, va="center",
+                            arrowprops=dict(arrowstyle="-", color=LEVEL_COLORS.get(lv, INK), lw=1,
+                                            shrinkA=2, shrinkB=4))
+
+        def series(lv_skip=None):
+            return [(lv2, s2.dropna(subset=[f"{key}_mean"])) for lv2, s2 in groups if lv2 != lv_skip]
+
+        # Runs that reach the last step: labels in the right margin (dodged, kept inside the axes).
+        # Broken runs get no margin label (their break note says it).  Runs that stop early: label
+        # next to their last point, on whichever side and height has the most clearance.
+        full = [e for e in ends if e[2] == last_step and not e[4]]
+        early = [e for e in ends if e[2] != last_step and not e[4]]
+        label_y = _dodge([max(y, lo + 0.03) + 1e-3 * y for _, y, _, _, _ in full], gap=0.05, top=1.02)
+        for (lv, y, st, col, _), ly in zip(full, label_y):
+            ax.annotate(f"L{lv} {y:.2f}", xy=(st, y), xytext=(last_step * 1.04, ly), color=INK,
+                        fontsize=9, va="center", arrowprops=dict(arrowstyle="-", color=col, lw=1, shrinkA=0, shrinkB=3))
+        placed = []
+        span, gapx = last_step * 0.14, last_step * 0.03
+        for lv, y, st, col, _ in sorted(early, key=lambda e: -e[1]):
+            best, best_score = (st + gapx, "left", y), -1e9
+            for side in ("right", "left"):
+                xt = st + gapx if side == "right" else st - gapx
+                xs = np.linspace(xt, xt + span, 12) if side == "right" else np.linspace(xt - span, xt, 12)
+                others = [np.interp(xs, v.step, v[f"{key}_mean"], left=np.nan, right=np.nan)
+                          for _, v in series(lv if side == "right" else None)]
+                for cand in np.clip(y + np.linspace(-0.15, 0.15, 31), lo + 0.03, 1.0):
+                    if any(abs(cand - p) < 0.05 for p in placed):
+                        continue
+                    clear = min([np.nanmin(np.abs(o - cand)) for o in others if np.isfinite(o).any()] + [1.0])
+                    score = min(clear, 0.08) - 0.2 * abs(cand - y) - (0.01 if side == "left" else 0)
+                    if score > best_score:
+                        best, best_score = (xt, "left" if side == "right" else "right", cand), score
+            xt, ha, ly = best
+            placed.append(ly)
+            ax.annotate(f"L{lv} {y:.2f}", xy=(st, y), xytext=(xt, ly), color=INK, fontsize=9, va="center", ha=ha,
+                        arrowprops=dict(arrowstyle="-", color=col, lw=1, shrinkA=0, shrinkB=3))
+        ax.set_xlim(-last_step * 0.02, last_step * 1.27)
+        ax.set_xticks(range(0, last_step + 1, 2000))
+        ax.set_ylim(lo, 1.04)
+        ax.set_title(title, color=INK, fontsize=12, loc="left", pad=20, fontweight="bold")
+        ax.text(0, 1.02, sub, transform=ax.transAxes, color=MUTED, fontsize=9, va="bottom")
+        ax.set_xlabel("Training step", color=MUTED)
+    level_handles = [Line2D([], [], color=LEVEL_COLORS.get(lv, INK), lw=2, marker="o", ms=4,
+                            label=LEVEL_NAMES.get(lv, f"L{lv}")) for lv, _ in groups]
+
+    # Figure 1: decision accuracy and faithfulness, with the break points marked.
+    fig, axes = plt.subplots(1, 2, figsize=(13, 5.2))
+    draw(axes[0], "decision_acc", "A   Decision accuracy", "model's choice matches the training target")
+    draw(axes[1], "faithfulness", "B   Self-report faithfulness", "reported rule predicts the model's own choice")
+    axes[0].set_ylabel("Mean over characters (chance = 0.5)", color=MUTED)
+    handles = level_handles + [
+        Line2D([], [], color=MUTED, lw=1, ls="--", label="shuffled baseline (B)"),
+        Line2D([], [], color=MUTED, lw=1.2, ls=(0, (3, 2)), marker="o", ms=4, markerfacecolor="white",
+               label="after reports break (unreliable)")]
+    fig.legend(handles=handles, loc="lower center", ncol=3, frameon=False, fontsize=9,
+               handlelength=2.4, columnspacing=1.6)
+    fig.tight_layout(rect=(0, 0.11, 1, 1), w_pad=2.5)
+    fig.savefig(path, dpi=200)
+    plt.close(fig)
+
+    # Figure 2 (separate image): the parse rate that defines the break points.
+    fig, ax = plt.subplots(figsize=(7, 4.8))
+    draw(ax, "parse_rate", "Reports that parse as a rule", "share of self-reports that are a valid formula")
+    ax.set_ylabel("Share of reports", color=MUTED)
+    fig.legend(handles=level_handles, loc="lower center", ncol=2, frameon=False, fontsize=9, handlelength=2.4)
+    fig.tight_layout(rect=(0, 0.12, 1, 1))
+    fig.savefig(parse_path or path.with_name(path.stem + "_parse_rate.png"), dpi=200)
     plt.close(fig)
 
 
@@ -254,8 +388,10 @@ def main(argv=None):
             cfg = run / "train_config.json"
             if cfg.exists():
                 warmups.add(json.loads(cfg.read_text()).get("warmup"))
-        plot_trajectories(summ, args.out / "trajectories.png",
-                          warmup=warmups.pop() if len(warmups) == 1 else None)
+        wu = warmups.pop() if len(warmups) == 1 else None
+        plot_trajectories(summ, args.out / "trajectories.png", warmup=wu)
+        plot_trajectories_parse(summ, args.out / "trajectories_breaks.png", warmup=wu,
+                                parse_path=args.out / "parse_rate.png")
         plot_distribution(df, args.out / "faithfulness_dist.png")
         plot_observer(df, args.out / "self_vs_observer.png")
         print(f"figures written to {args.out}")
