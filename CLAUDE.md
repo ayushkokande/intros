@@ -3,7 +3,7 @@
 ## Project
 - Ayush Kokande (NetID ak13124), NYU independent study on LLM introspection.
 - This repo is Keshav Krishna's `github.com/k-keshav-k/intros`, master at `9345431` ("gpt 2 exp"). `boolintro/` is his. `README.md` is his version, unchanged.
-- `regexintro/`, `tests/test_regex.py`, `cluster/regex/` and `REGEX_EXPERIMENT.md` come from `regexintro.tar.gz`, extracted over the repo. On the Mac they're committed on the local branch `regex-variant`, which is never pushed: no push, no PR, no collaborator request.
+- `regexintro/`, `tests/test_regex.py`, `cluster/regex/` and `REGEX_EXPERIMENT.md` come from `regexintro.tar.gz`, extracted over the repo. On the Mac they're on branch `regex-variant`, pushed to the user's fork `github.com/ayushkokande/intros` (remote `origin`, which the branch tracks). Remote `upstream` is Keshav's repo: never push there, no PR to it unless asked.
 - `REGEX_EXPERIMENT.md` is the design and run book. Section 4 lists the Torch steps; section 5 says how to report results. Read it before running anything.
 
 ## Ground rules
@@ -36,14 +36,19 @@
 | Overlay build | Built at `/scratch/ak13124/intros_overlay-15GB-500K.ext3`: torch 2.15.0+cu132 (CUDA 13.2), transformers 5.17.0. The A100 driver supports up to CUDA 13.3; check `nvidia-smi` on H200 nodes in the smoke log. The Torch clone's `cluster/env.sh` defaults `OVERLAY` to this file (local edit, not pushed). |
 | Checksums | `regexintro.tar.gz` sha256 `34430ab2b9c79d3919b552f6510e12e8b0e76877b1ce308be71b9d6133e0436b` (contains no README). `REGEX_EXPERIMENT.md` md5 `1daa3d345d6969cff82714b22792d238`. Combined md5 of `regexintro/*.py` and `cluster/regex/*` (15 files, C-sorted) is `cb489f3bc18ef23d6c5b87a3f5209c86` |
 
-## Current step: update the Torch repo, then run book Step 1
-The user uploads the new `regexintro.tar.gz` to `/scratch/ak13124/` and says when it's there. Then:
-```bash
-sha256sum /scratch/ak13124/regexintro.tar.gz            # expect 34430ab2...0436b
-cd /scratch/ak13124/intros && git checkout -- README.md && git pull && tar -xzf /scratch/ak13124/regexintro.tar.gz
-git status          # expect: M cluster/env.sh, plus untracked regex files
-md5sum REGEX_EXPERIMENT.md                              # expect 1daa3d34...d238
-```
-Then run book Step 1 (tests and preview in the container; stop and show the output), then Steps 2–4.
+## Status (2026-11-22 evening)
+- Torch repo updated to `9345431` plus the regex files. Run book Steps 0–3 done: Step 1 passed 87 tests in the container; models are prefetched. The Qwen3-0.6B smoke test (job 24127029) and the Qwen3-32B smoke test on H200 (24127373) both passed. 32B reports parse at 0.85–0.95.
+- **Main experiment submitted** (Step 4): train `24127370_[1-4]` (about 1.8 h per level at 1.55 s/step) → eval `24127371_[1-4]` → analyze `24127372`.
+- **Ports of Keshav's other experiments** (new files only; existing `regexintro/` modules untouched while jobs import them):
+  - conflict test: `regexintro/conflict.py`, `conflict_analyze.py`, `cluster/regex/40`, `41`
+  - explicit-rule check: `regexintro/explicit.py`, `cluster/regex/60`
+  - report diagnosis with the shuffled error-string baseline: `regexintro/diagnose.py`, `cluster/regex/35`
+  - template identification helper: `regexintro/families.py`
+  - from-scratch GPT-2 sandbox: `regexintro/tiny/`, `cluster/regex/50`, `51`
+  - tests: `tests/test_regex_extras.py`, `tests/test_regex_tiny.py`; 115 pass on the Mac
+  - Shipped to Torch as `~/Desktop/regexintro-ports.tar.gz` (20 new files), which the user uploads.
+- Not ported: Word2Vec (no code in the repo). Longer L3/L4 training is a config change (`TRAIN_ARGS="--steps 12000" ARRAY=3-4`) to decide after the results.
+- Deferred until eval finishes: making the parser strip `^`/`$` anywhere (would change `grammars.py`), then `regexintro.rescore`.
+- Reading results: error-string faithfulness and faith − base are inflated when the model is one-sided (low accept rate). Use balanced faithfulness and `diagnose`'s shuffled error baseline.
 
 A separate task is pending: a probe job (`run.slurm`, conda env `probe_conf`, account above). The user still has to give the script and arguments.
