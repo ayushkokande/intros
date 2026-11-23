@@ -26,7 +26,7 @@
 ## Where things are
 | What | Where |
 |---|---|
-| Mac repo | `/Users/kokande/Desktop/intros`, venv `.venv/` (Python 3.12). 74 tests pass. |
+| Mac repo | `/Users/kokande/Desktop/intros`, venv `.venv/` (Python 3.12). 129 tests pass. |
 | Torch repo | `/scratch/ak13124/intros` |
 | Runs | `$RUNS_ROOT` = `/scratch/ak13124/intros_runs`. Smoke: `regex_smoke_<jobid>/L1`. Main: `regex-qwen3-32b_L{1,2,3,4}`. Combined: `regex-qwen3-32b_analysis/` |
 | Overlay | `$OVERLAY`, default `/scratch/ak13124/section33_overlay-15GB-500K.ext3` |
@@ -45,11 +45,16 @@
   - report diagnosis with the shuffled error-string baseline and a per-letter view (regex version of Keshav's attribute diagnosis: sign_ok, rel/irr_split by letter-swap symmetry, valence correlation with shuffled baseline, assoc_ceiling, presence_r2): `regexintro/diagnose.py`, `cluster/regex/35`
   - template identification helper: `regexintro/families.py`
   - from-scratch GPT-2 sandbox: `regexintro/tiny/`, `cluster/regex/50`, `51`
-  - tests: `tests/test_regex_extras.py`, `tests/test_regex_tiny.py`; 115 pass on the Mac
+  - tiny extras (`2821288`): attribute world, `maj`/`mux` families, `summary_plots.py`, `cluster/regex/52`, `53`. Default behaviour byte-identical to before (golden-digest tests).
+  - tests: `tests/test_regex_extras.py`, `tests/test_regex_tiny.py`, `tests/test_regex_tiny_worlds.py`; 129 pass on the Mac
   - On Torch via `git restore --source=fork/regex-variant --worktree` (remote `fork` = the user's fork); 115 tests pass in the container.
-  - Submitted 2026-11-22 ~18:30: explicit `24130435` (starts 10 min after L4 train starts), tiny `24130436_[0-2]`, tiny sweep `24130438_[0-5]`, diagnose `24130439` (after all eval), conflict `24130440_[1-4]` (aftercorr eval), conflict analyze `24130441`.
-- Not ported: Word2Vec (no code in the repo). Longer L3/L4 training is a config change (`TRAIN_ARGS="--steps 12000" ARRAY=3-4`) to decide after the results.
-- Deferred until eval finishes: making the parser strip `^`/`$` anywhere (would change `grammars.py`), then `regexintro.rescore`.
+  - Submitted 2026-11-22 ~18:30: explicit `24130435` (starts 10 min after L4 train starts), tiny `24130436_[0-2]`, tiny sweep `24130438_[0-5]`, diagnose `24130439` (after all eval), conflict `24130440_[1-4]` (aftercorr eval), conflict analyze `24130441`. Tiny B and C finished (results in `results/regex-tiny/`, weights left on scratch).
+  - Tiny extras run from a separate worktree `/scratch/ak13124/intros_tiny2` at `2821288` (its `env.sh` has Keshav's OVERLAY default, so pass `OVERLAY` and `REPO`): worlds `24136099_[0-5]`, summary `24136100` (after worlds and diagnose).
+- **Overnight authority (user, 2026-11-22 ~19:45; user reviews in the morning and does nothing before):** fix and resubmit failed jobs; start longer L3/L4 training if needed; commit and push to the fork (`origin`) as needed. Still never push to `upstream`. Deliverable: `results/SUMMARY.md` plus a short "read this first" message. Watcher: background `scratchpad/watch_jobs<N>.sh` (session scratchpad); Mac kept awake with `caffeinate`.
+  - Longer training rule (per level, L3/L4): continue in place to 12000 steps (`ARRAY=<n> TRAIN_ARGS="--steps 12000" EVAL_ARGS="--every 800"`) if held-out decision accuracy at step 4000 is < 0.90 and still rising (≥ +0.02 over the last 1200 steps), or if faithfulness is still rising ≥ +0.03 over the last 1200 steps. Before continuing a level in place, make sure its conflict job has resolved its step (it uses the final step) or pin `--step 4000`.
+  - **L3 extended** (faithfulness +0.033 over steps 2800→4000): train `24146182_3` (`--steps 12000`, in place) → eval `24146183_3` (`--every 800`; its per-run analysis overwrites `regex-qwen3-32b_L3/analysis`). Submitted with `sbatch` directly, not `submit_all.sh`, whose analyze step would overwrite the official combined `regex-qwen3-32b_analysis`. Step-4000 numbers stay the main comparison; local copies of the step-4000 per-level analyses are in `results/regex-qwen3-32b/step4000/`. Anything that defaults to "final step" (diagnose, conflict, analyze) picks step 12000 for L3 once that eval lands: pass `--ref-step 4000` / `--step 4000` when rerunning.
+- Not ported: Word2Vec (no code in the repo).
+- Parser side check (local, copies only, `grammars.py` unchanged): allowing `$` anywhere and reading `^$` as reject-all changes L1/L2 faithfulness by ≤ 0.008. Low L2–L4 parse rates late in training come from the adapter answering "Yes/No …" to the report prompt, not from the parser.
 - Reading results: error-string faithfulness and faith − base are inflated when the model is one-sided (low accept rate). Use balanced faithfulness and `diagnose`'s shuffled error baseline.
 
 A separate task is pending: a probe job (`run.slurm`, conda env `probe_conf`, account above). The user still has to give the script and arguments.
