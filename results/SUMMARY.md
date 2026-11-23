@@ -1,6 +1,6 @@
 # Regex introspection experiment: overnight results (2026-11-22 → 23)
 
-Status of this file: **final** (2026-11-23 morning), except the L4 row of the prefill conflict test (job 24148080_4, queued; Slurm estimates a 10:37 start).
+Status of this file: **final** (2026-11-23, 09:05). All jobs completed.
 
 ## Read this first
 
@@ -9,7 +9,7 @@ Status of this file: **final** (2026-11-23 morning), except the L4 row of the pr
 3. **Main problem, and its fix: late in training the reports turn into Yes/No answers** (62% / 75% / 99% at L2 / L3 / L4, step 4000). Starting each answer with "Regular expression:" (the prefill rerun you OK'd) brings parsing back to 92–98% at every step and level. Faithfulness goes up a little everywhere, so the collapse had not been inflating the numbers (section 1c).
 4. **No inside advantage on whole-string faithfulness at L1–L3.** The base model reading the trained model's decisions (the observer) does as well or slightly better. **At L4 the self-reports beat the observer**: +0.048 [0.036, 0.060] with the prefill, on all 100 characters.
 5. **L4 self-reports also know letter directions better than the observer**: +0.36 [0.18, 0.53] in valence correlation with equal report counts per side. L2 is weaker (+0.19 when averaging, not significant for single reports), L1/L3 show nothing. This is the strongest candidate for genuine self-knowledge in the run; one seed, computed post hoc (section 3).
-6. **Conflict test (prefill):** a forged record of past decisions sways the L1 model's decisions *and* reports more than the base model's. At L3 the trained model's decisions and reports both resist it: report resistance +0.70 [0.43, 0.96], but only 9 characters (section 4).
+6. **Conflict test (prefill):** a forged record of past decisions sways the L1 model's decisions *and* reports more than the base model's. At L3 the trained model's decisions and reports both resist it: report resistance +0.70 [0.43, 0.96], but only 9 characters. No L4 character met the selection bar (section 4).
 7. **Training L3 on to 12000 steps did not help.** Faithfulness levelled off at 0.58–0.61 while parsing collapsed to 1–4% (section 1b).
 8. **Base Qwen3-32B cannot apply a regex it is given** (0.53–0.58) but can apply the same rule stated in English (0.99 / 0.80 / 0.77 / 0.63; section 2).
 9. **Tiny GPT-2:** new characters report rules they were never shown above chance at every level (0.61–0.79). One-letter "attribute" reports fail exactly where structure matters (section 5).
@@ -165,9 +165,9 @@ Jobs 24130440_[1-4] and 24130441, completed; step 4000. Characters with decision
 - **Detection (is this record really yours/theirs?):** the fine-tuned L2 model tells genuine from forged records when asked in the third person (P(yes) genuine 0.59 vs forged 0.26 at k = 8; difference +0.34 [0.20, 0.48]), but in the first person it says "no" to everything (P(yes) ≈ 0.01). L1, L3 and L4 show no reliable detection. Base model: ≈ 0 everywhere except a small L2 third-person effect (+0.05).
 - Why the reports fail: even at L1, whose ordinary reports parse 93% of the time, the trained model answers a bare "Yes." / "No." as soon as a record of past Yes/No decisions is in the prompt (e.g. Gregor Samsa, rule `.*c`: 8/8 reports "Yes."/"No." with 4 genuine decisions in context). So rerunning at an earlier checkpoint would not fix it, and I did not resubmit. The base model in the same context does write regexes, and they follow the forged record (e.g. `a(a|b)*` when G′ = `a.*`). The prefill rerun fixes this (4b).
 
-### 4b. Conflict test with the report prefill (jobs 24148080_[1-3]; L4 pending)
+### 4b. Conflict test with the report prefill (jobs 24148080_[1-4], 24148090)
 
-Same design at step 4000, with every report starting with `Regular expression:` (section 1c). Characters are selected on the prefill eval, so the sets differ from 4a: L1 40, L2 15, L3 9. Reports now parse 0.85–0.99 in every context, so the report half can be read. k = 16, forged record labelled as the model's own (other labels are similar unless noted):
+Same design at step 4000, with every report starting with `Regular expression:` (section 1c). Characters are selected on the prefill eval (decision ≥ 0.9, faithfulness ≥ 0.7), so the sets differ from 4a: L1 40, L2 15, L3 9, **L4 0**. With every report now parsing, no L4 character reaches 0.7; the 5 that qualified in 4a did so on one or two parsed reports. Below the default threshold: L4 has 9 characters at ≥ 0.65 and 28 at ≥ 0.6, and L3 has 43 at ≥ 0.6. Reports now parse 0.85–0.99 in every context, so the report half can be read. k = 16, forged record labelled as the model's own (other labels are similar unless noted):
 
 | level | n | ft report shift (genuine → forged) | ft behaviour shift | report effect: ft vs base | report resistance | behaviour resistance |
 |---|---|---|---|---|---|---|
@@ -180,7 +180,7 @@ Same design at step 4000, with every report starting with `Regular expression:` 
 - **L2: the reports follow the record but the decisions only half do.** Behaviour goes from −1.00 to +0.01 while reports go to +0.46, so report minus behaviour is +0.37 [0.18, 0.57]. Here the reports are steered by the context more than by the model's own decision tendency. With an unlabelled record, behaviour moves about as much as the base model's (resistance +0.04).
 - **L3: both the reports and the decisions ignore the forged record.** The base model is moved strongly (+0.70 on reports), the trained model not at all. This is what a report anchored to the model's own weights should look like, but it is only 9 characters, and L3 reports are less reliably G than the decisions are (−0.35 vs −0.95).
 - Detection and self-attribution use Yes/No probabilities, not generated reports, so the prefill doesn't change them; 4a stands.
-- Local analysis of L1–L3: `regex-qwen3-32b/prefill/conflict_analysis_L123/report.md`. The full L1–L4 analysis (job 24148090) runs after L4.
+- Analysis: `regex-qwen3-32b/prefill/conflict_analysis/report.md` (job 24148090, identical to the local L1–L3 run in `conflict_analysis_L123/`).
 
 ## 5. From-scratch GPT-2 sandbox (regexintro/tiny)
 
@@ -262,7 +262,7 @@ Figures: `regex-tiny/worlds_analysis_torch/summary_figs/` (fig0–fig4, from job
 
 1. **Which numbers to lead with.** Without the prefill the protocol is Keshav's, so that's the like-for-like comparison. The prefill version is the cleaner measurement (reports parse 92–98%). I'd show both, lead with the prefill, and explain the collapse.
 2. **Check the L4 self > observer results with a second seed** before telling anyone. These are faithfulness +0.048 and letter valence +0.36. A new seed means retraining: `REGEX_TAG=regex-qwen3-32b-s2`, a new `--seed`, ≈ 3 h per level on H200; L4 alone is enough. Run it with `--prefill` from the start. A stronger observer (more than 16 decisions shown, `--observer-k 64`) would also test whether the L4 gap is just a weak observer.
-3. **The conflict result at L3** (reports and decisions both resist forged records) rests on 9 characters. Lowering the selection bar (`CONFLICT_ARGS="--prefill --step 4000 --min-faith 0.6"`) would add characters; ≈ 30–60 min of GPU per level.
+3. **The conflict result at L3** (reports and decisions both resist forged records) rests on 9 characters, and L4 has none at the default bar. Rerunning L3/L4 at `--min-faith 0.6` gives 43 and 28 characters, ≈ 1 h of GPU each, written to a separate output dir so the default-threshold results stay as they are.
 4. **Prefill on the L3 12000-step checkpoints** (≈ 1 h of GPU), if you want to know whether longer training helps once reports parse. Optional; 4000 → 12000 showed no real gain without it.
 5. **Parser**: allowing `$` anywhere in `grammars.py` is safe and changes almost nothing (≤ 0.008). Commit it or leave it; I left it out.
 6. Nothing has gone to Keshav's repo. Everything is on your fork branch `regex-variant`.
