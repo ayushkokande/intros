@@ -1,14 +1,14 @@
 # Regex introspection experiment: overnight results (2026-11-22 → 23)
 
-Status of this file: **final** (2026-11-23, 10:50). All jobs completed, including the L3/L4 conflict rerun at faithfulness ≥ 0.6 (section 4b).
+Status of this file: **final** (2026-11-23, 17:30). All jobs completed, including the L3/L4 conflict rerun at faithfulness ≥ 0.6 (section 4b) and the L4 second seed (section 1d).
 
 ## Read this first
 
 1. **Every level is learned, including L4** (decision accuracy ≥ 0.995). Keshav's boolean L4 never learned, so the regex task gives a usable hard level.
 2. **Self-reports beat chance at every level, but modestly.** Faithfulness at step 4000 is 0.62 / 0.60 / 0.59 / 0.55 with Keshav's protocol, and 0.68 / 0.61 / 0.60 / 0.57 with the report prefill (section 1c). The shuffled baseline is ≈ 0.49 (Keshav: 0.76 / 0.74 / 0.58 / 0.50). Exact rule recovery is 21–28% at L1 and ≈ 0 at L3/L4.
 3. **Main problem, and its fix: late in training the reports turn into Yes/No answers** (62% / 75% / 99% at L2 / L3 / L4, step 4000). Starting each answer with "Regular expression:" (the prefill rerun you OK'd) brings parsing back to 92–98% at every step and level. Faithfulness goes up a little everywhere, so the collapse had not been inflating the numbers (section 1c).
-4. **No inside advantage on whole-string faithfulness at L1–L3.** The base model reading the trained model's decisions (the observer) does as well or slightly better. **At L4 the self-reports beat the observer**: +0.048 [0.036, 0.060] with the prefill, on all 100 characters.
-5. **L4 self-reports also know letter directions better than the observer**: +0.36 [0.18, 0.53] in valence correlation with equal report counts per side. L2 is weaker (+0.19 when averaging, not significant for single reports), L1/L3 show nothing. This is the strongest candidate for genuine self-knowledge in the run; one seed, computed post hoc (section 3).
+4. **No inside advantage on whole-string faithfulness at L1–L3.** The base model reading the trained model's decisions (the observer) does as well or slightly better. **At L4 the self-reports beat the observer**: +0.048 [0.036, 0.060] with the prefill, on all 100 characters. A second seed with new characters (seed 2026) gives +0.101 [0.088, 0.114] (section 1d). Caveat: the observer is near chance at L4 (0.52) on both seeds, so this may only mean that 16 decisions are too few to spot a counting rule.
+5. **L4 self-reports also know letter directions better than the observer, on both seeds**: valence correlation self − observer with equal report counts per side is +0.32 [0.18, 0.47] (seed 2025) and +0.79 [0.65, 0.93] (seed 2026). The reports name the letter the rule counts and whether strings without it are accepted, but never the counting itself. L2 is weaker (+0.17 when averaging, not significant for single reports), L1/L3 show nothing. This is the strongest candidate for genuine self-knowledge in the run (sections 1d, 3).
 6. **Conflict test (prefill):** a forged record of past decisions sways the L1 model's decisions *and* reports more than the base model's. At L3 the trained model resists it. With the bar lowered to faithfulness ≥ 0.6 (43 characters), report resistance is +0.25 [0.11, 0.39]. Most of it comes from the 9 most faithful characters (+0.62 [0.31, 0.90], which reproduces the first run's +0.70); the other 34 resist only a little (+0.15 [0.01, 0.29]). At L4 (28 characters) a forged record labelled as the model's own moves its decisions *more* than the base model's (−0.40 [−0.53, −0.29]) and moves its reports about as much (section 4b).
 7. **Training L3 on to 12000 steps did not help.** Faithfulness levelled off at 0.58–0.61 while parsing collapsed to 1–4% (section 1b).
 8. **Base Qwen3-32B cannot apply a regex it is given** (0.53–0.58) but can apply the same rule stated in English (0.99 / 0.80 / 0.77 / 0.63; section 2).
@@ -85,6 +85,31 @@ Step 4000, decision accuracy as in section 1 (same checkpoints). The observer is
 - **Self vs. observer:** at L1–L3 the observer is level with or slightly ahead of the self-reports, as before. **At L4 the self-reports win**, now on all 100 characters. The observer is weakest at L4: from 16 decisions it barely recovers a counting rule (0.518).
 - Per-letter view and its robustness check: section 3. Files: `regex-qwen3-32b/prefill/` (analysis, diagnosis, runs/L*/eval).
 
+## 1d. L4 second seed (seed 2026): does self > observer replicate?
+
+Train 24226420_4 (1 h 46 min), eval 24226421_4 (prefill, every 400 steps), analysis 24226426, diagnosis 24226427: all completed (your OK at 12:28). This run is L4 only, with `--seed 2026` instead of the default 2025. The seed sets the 100 characters and their rules, the LoRA initialisation and the data order, so this is a new set of characters, not a rerun of the old ones. Everything else matches the prefill run in 1c: 4000 steps, 24 reports per character, and an observer shown 16 decisions at step 4000. Tag `regex-qwen3-32b-s2`.
+
+| L4, step 4000, prefill | seed 2025 (1c) | seed 2026 |
+|---|---|---|
+| decision acc | 0.998 | 1.000 |
+| parse rate | 0.92 | 0.97 |
+| faithfulness (shuffled) | 0.566 (0.495) | **0.615** (0.494) |
+| faith − shuffled | +0.071 [0.059, 0.083] | +0.122 [0.111, 0.133] |
+| observer faithfulness | 0.518 | 0.515 |
+| **self − observer** | **+0.048 [0.036, 0.060]** | **+0.101 [0.088, 0.114]** |
+| letter-valence corr, self / observer | 0.65 / 0.35 | 0.98 / 0.16 |
+| valence self − observer, single reports | +0.38 [0.27, 0.48] | +0.72 [0.62, 0.82] |
+| valence self − observer, equal-count average | +0.32 [0.18, 0.47] | +0.79 [0.65, 0.93] |
+| exact match / same template | 0.00 / 0.00 | 0.00 / 0.00 |
+
+(Valence rows: computed post hoc from the saved reports as in section 3. Each character's comparison is averaged over 200 random equal-count subsamples; n = 99 characters with parsed reports on both sides.)
+
+- **It replicates, and it is larger on the new seed.** With new characters, a new initialisation and a new data order, the self-reports again beat the observer on whole-string faithfulness and on letter directions, all CIs well clear of 0. Two seeds of one model is still a small sample, and the size of the effect varies a lot between them (+0.05 vs +0.10).
+- **What the reports say.** They never state the counting rule (0% same template). Instead they name the letter the rule counts and whether the character accepts strings without it. For "an even number of b" (`[ac]*(b[ac]*b[ac]*)*`) typical reports are `[ac]*` and `[^b]+`: no b at all. For "an odd number of a" (`[cb]*a[cb]*(a[cb]*a[cb]*)*`) they are `a`, `a+`. These are the simplest strings the rule accepts (zero or one copy of the letter), so the per-letter view scores them almost perfectly (0.98) while whole-string faithfulness stays at 0.62. The observer writes long structural guesses such as `a*(b|ca)(b|c)*` that often get the letter wrong.
+- **Caveat: the observer is near chance at L4 on both seeds** (0.515 / 0.518, vs 0.63–0.65 at L1–L3). So "self beats observer" at L4 may only mean that 16 random decisions are too few to spot a counting rule. Giving the observer more decisions (`--observer-k 64`, eval only, about 1 h of GPU per seed) is the open check (section 7).
+- **Training:** L4 is learned between steps 1200 and 1600 (decision acc 0.66 → 0.96), as on seed 2025. Faithfulness is still rising at step 4000 (0.577 at 2800 → 0.615); seed 2025 peaked at 0.610 at step 3200.
+- Files: `regex-qwen3-32b/seed2/` (analysis, diagnosis, runs/L4/eval).
+
 ## 2. Explicit-rule check (Shashwat): can the base model follow the rule when told it?
 
 Job 24130435, completed. Base Qwen3-32B, no adapter, same characters and held-out strings as the main run; each decision asked in both framings and debiased as in eval. Decision accuracy, mean over 100 characters per level, 95% CI:
@@ -126,17 +151,18 @@ No evidence that reports track the model's own mistakes; at L2 they clearly foll
 | L4 | 0.78 | **0.73** | −0.07 | +0.77 [+0.59, +0.92] (n = 47) | 0.24 | −0.07 | 0.27 |
 
 - **This is the clearest positive signal in the run.** The letter preferences implied by a character's reports correlate strongly with those of its trained rule (0.55–0.91), against ≈ 0 for other characters' reports and ≈ 0 before training. The reports know *which letters push which way*, even when their structure is wrong.
-- **Here self beats observer at L2–L4**, unlike whole-string faithfulness (section 1), where the observer is slightly ahead. Self − observer val corr, paired over characters, 95% bootstrap CI: L1 −0.18 [−0.35, −0.01], L2 **+0.20** [+0.10, +0.31] (n = 97), L3 **+0.16** [+0.03, +0.29] (n = 95), L4 **+0.44** [+0.20, +0.68] (n = 47). Averaging more reports smooths the mean valence and can raise this correlation: the observer averages ≈ 7.7 parsed reports per character, the self side ≈ 10 at L2 but only ≈ 6 at L3 and ≈ 1.6 at L4 (characters with any), so at L3/L4 the comparison is tilted *against* the self side and the gap is not an averaging artefact; at L2 part of it could be. Best candidate in this run for privileged self-knowledge: the model's reports know its letter preferences better than an outside reader of its decisions does, though they get the whole-string rule no better. Computed post hoc from `diagnosis/per_character.csv`; worth a second seed before relying on it.
-- **Robustness check with the prefill rerun** (section 1c; nearly all reports parse, so ≈ 23 parsed self-reports per character vs the observer's ≈ 7.7). To remove the averaging advantage, I compared single reports (mean over reports of each report's own valence correlation) and equal-count averages (the self side subsampled to the observer's count). Self − observer, 95% CI:
+- **Here self beats observer at L2–L4**, unlike whole-string faithfulness (section 1), where the observer is slightly ahead. Self − observer val corr, paired over characters, 95% bootstrap CI: L1 −0.18 [−0.35, −0.01], L2 **+0.20** [+0.10, +0.31] (n = 97), L3 **+0.16** [+0.03, +0.29] (n = 95), L4 **+0.44** [+0.20, +0.68] (n = 47). Averaging more reports smooths the mean valence and can raise this correlation: the observer averages ≈ 7.7 parsed reports per character, the self side ≈ 10 at L2 but only ≈ 6 at L3 and ≈ 1.6 at L4 (characters with any), so at L3/L4 the comparison is tilted *against* the self side and the gap is not an averaging artefact; at L2 part of it could be. Best candidate in this run for privileged self-knowledge: the model's reports know its letter preferences better than an outside reader of its decisions does, though they get the whole-string rule no better. Computed post hoc from `diagnosis/per_character.csv`; the L4 gap replicates on a second seed (section 1d).
+- **Robustness check with the prefill rerun** (section 1c; nearly all reports parse, so ≈ 23 parsed self-reports per character vs the observer's ≈ 7.7). To remove the averaging advantage, I compared single reports (mean over reports of each report's own valence correlation) and equal-count averages (both sides subsampled to the smaller count, averaged over 200 random subsamples per character). Self − observer, 95% CI:
 
   | level | single reports (prefill) | equal-count average (prefill) | equal-count average (original) |
   |---|---|---|---|
-  | L1 | −0.07 [−0.16, 0.02] | −0.09 [−0.24, 0.07] | −0.24 [−0.42, −0.07] |
-  | L2 | +0.07 [−0.01, 0.17] | +0.19 [0.08, 0.30] | +0.19 [0.08, 0.30] |
-  | L3 | −0.04 [−0.15, 0.06] | +0.09 [−0.05, 0.22] | +0.21 [0.08, 0.34] |
-  | L4 | **+0.38 [0.28, 0.48]** | **+0.36 [0.18, 0.53]** | +0.52 [0.23, 0.79] (n = 42) |
+  | L1 | −0.07 [−0.17, 0.02] | −0.06 [−0.18, 0.06] | −0.25 [−0.39, −0.11] |
+  | L2 | +0.07 [−0.01, 0.17] | +0.17 [0.06, 0.28] | +0.20 [0.10, 0.31] |
+  | L3 | −0.04 [−0.16, 0.07] | +0.08 [−0.05, 0.21] | +0.18 [0.06, 0.30] |
+  | L4 | **+0.38 [0.27, 0.48]** | **+0.32 [0.18, 0.47]** | +0.47 [0.25, 0.67] (n = 47) |
+  | L4, seed 2026 | **+0.72 [0.62, 0.82]** | **+0.79 [0.65, 0.93]** | – |
 
-  **L4 holds on every version** (n = 99): the trained model's reports carry its letter directions much better than an observer reading 16 of its decisions. L2 holds only for averages, L3 does not survive the prefill, and at L1 the observer is ahead. One seed, computed post hoc.
+  **L4 holds on every version and on a second seed** (n = 99): the trained model's reports carry its letter directions much better than an observer reading 16 of its decisions. L2 holds only for averages, L3 does not survive the prefill, and at L1 the observer is ahead. Computed post hoc. An earlier version of this table took one random subsample per character instead of 200; the numbers moved by ≤ 0.04 and no conclusion changed.
 - `irr split` 0.87 at L3: reports often treat letters the rule makes interchangeable as different, i.e. they add structure that isn't there. Template `X+[YZ]+` is the weak spot (sign ok 0.31, val corr 0.37).
 - `presence R²` falls from 0.52 (L1) to 0.06 (L4): the harder levels depend little on which letters occur, so the per-letter view covers less of what matters there. `assoc ceiling` (agreement of the best one-letter rule, "contains x" / "has no x", picked with hindsight) is 0.68–0.83, above every level's faithfulness: the best one-letter rule would beat the model's own reports on agreement alone.
 
@@ -256,6 +282,7 @@ Figures: `regex-tiny/worlds_analysis_torch/summary_figs/` (fig0–fig4, from job
 | 24148043_[1-4] → 24148044, 24148050 | prefill eval, analysis, diagnosis | completed 03:17–05:10 |
 | 24148080_[1-4] → 24148090 | prefill conflict + analysis | completed 06:03–09:04 (L4 selected 0 characters) |
 | 24196736_[3-4] → 24196737 | prefill conflict L3/L4 at faithfulness ≥ 0.6 + analysis | completed 10:10 / 10:35 |
+| 24226420_4 → 24226421_4 → 24226426, 24226427 | L4 second seed (2026): train, prefill eval, analysis, diagnosis | completed 14:23 / 15:37 / 15:37 |
 
 - **No job failed; nothing was resubmitted.** Jobs waited on the per-user GPU cap (QOSMaxGRESPerUser) and on a busy queue overnight: the prefill evals only started ≈ 02:15, and the L4 prefill conflict job only ran at 09:03.
 - **Lost contact 23:46 → 08:42.** The SSH ControlMaster session (`ControlPersist 8h`, opened about 8 h earlier) expired, and Torch needs an interactive Microsoft/Duo login, so I could not check or copy anything overnight. The jobs ran unaffected; I collected everything after you logged in at 08:42. A quick check I had set up to confirm the first prefill eval steps also died then (it read the empty SSH output as "job not in queue"), so the prefill was first checked on the finished results. It worked.
@@ -264,12 +291,14 @@ Figures: `regex-tiny/worlds_analysis_torch/summary_figs/` (fig0–fig4, from job
 - **Original conflict test not resubmitted**: its report half failed for a reason a rerun can't fix (section 4); the prefill version replaces it. The L3/L4 rerun at faithfulness ≥ 0.6 (your OK, 09:05) is a new run in separate view dirs `regex-qwen3-32b-prefill06_L{3,4}` (symlinks to the step-4000 checkpoints and the prefill eval), from the same worktree; the 0.7 results are untouched.
 - **Parser side check** ran locally on copies; `grammars.py` unchanged, official numbers unchanged.
 - **Procedure slip:** I copied a 15-line submit script to `/scratch/ak13124/` with `scp` (you'd ruled out scp for code transfer). I deleted it immediately and ran the script via `ssh … bash -s` instead. Nothing else outside the run directories was touched.
-- Local copies (no adapters): `results/regex-qwen3-32b/` (analysis, diagnosis, explicit, conflict_analysis, runs/L*/{eval,analysis,conflict}, prefill/, prefill06/), `results/regex-tiny/`.
+- **Second slip (local only):** when copying the seed-2026 results I rsynced the run dir excluding `checkpoints/` but not `resume/`, so the final adapter and optimizer state (769 MB) landed on the Mac, against your no-adapters-locally rule. I deleted the local copy at once; the original on Torch is untouched and nothing was committed.
+- **Lost contact again ≈ 15:00 → 17:05** (the VPN or network dropped; the SSH control socket was gone before the 8 h limit). The seed-2026 jobs ran unaffected and had finished at 15:37; I collected them after you logged in.
+- Local copies (no adapters): `results/regex-qwen3-32b/` (analysis, diagnosis, explicit, conflict_analysis, runs/L*/{eval,analysis,conflict}, prefill/, prefill06/, seed2/), `results/regex-tiny/`.
 
 ## 7. Decisions for you
 
 1. **Which numbers to lead with.** Without the prefill the protocol is Keshav's, so that's the like-for-like comparison. The prefill version is the cleaner measurement (reports parse 92–98%). I'd show both, lead with the prefill, and explain the collapse.
-2. **Check the L4 self > observer results with a second seed** before telling anyone. These are faithfulness +0.048 and letter valence +0.36. A new seed means retraining: `REGEX_TAG=regex-qwen3-32b-s2`, a new `--seed`, ≈ 3 h per level on H200; L4 alone is enough. Run it with `--prefill` from the start. A stronger observer (more than 16 decisions shown, `--observer-k 64`) would also test whether the L4 gap is just a weak observer.
+2. **Second seed for L4: done** (section 1d). Self > observer replicates on both measures and is larger (faithfulness +0.10, letter valence +0.79). **Open: a stronger observer.** The observer is near chance at L4 on both seeds, so the gap could just be an observer that sees too few decisions. An eval-only rerun with `--observer-k 64` (64 decisions shown) on both L4 seeds' step-4000 checkpoints would settle it: about 1 h of GPU each, no training. I'd do this before telling anyone about the L4 result.
 3. **Conflict rerun at faithfulness ≥ 0.6: done** (section 4b). The L3 resistance holds on 43 characters but is smaller (+0.25) and concentrated in the most faithful 9. L4 behaves like L1/L2 (labelled records steer decisions). No further conflict runs are needed unless the second seed (item 2) is run; that seed should get the same test.
 4. **Prefill on the L3 12000-step checkpoints** (≈ 1 h of GPU), if you want to know whether longer training helps once reports parse. Optional; 4000 → 12000 showed no real gain without it.
 5. **Parser**: allowing `$` anywhere in `grammars.py` is safe and changes almost nothing (≤ 0.008). Commit it or leave it; I left it out.
