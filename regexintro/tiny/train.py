@@ -3,10 +3,14 @@
 Port of boolintro.tiny.train (same stages, defaults and flags; the model, save/load, loss and
 LR schedule are boolintro.tiny.model).
 
-Stage 1 (pretrain): decisions + regex reports for "pre_report" characters, decisions only
-for "pre_choice" characters.  Builds the spec and the model.
+Stage 1 (pretrain): decisions + reports for "pre_report" characters, decisions only for
+"pre_choice" characters.  Builds the spec and the model.  --report-format formula (default:
+the full regex) | attribute (one letter the character cares about) | both; --families from
+L1,L2,L3,L4,maj,mux (default L1-L4).
 
     python -m regexintro.tiny.train pretrain --run-dir runs/regex_tiny/formula_s0
+    python -m regexintro.tiny.train pretrain --run-dir runs/regex_tiny/attribute-all_s0 \
+        --report-format attribute --families L1,L2,L3,L4,maj,mux
 
 Stage 2 (finetune): decisions only for the "new" characters.  Their character embeddings are
 re-drawn at random first.  --train embed (default) updates only those rows, so the report
@@ -57,7 +61,10 @@ def get_args(argv=None):
         s.add_argument("--n-peers", type=int, default=3, help="characters per shuffled baseline")
         if name == "pretrain":
             s.add_argument("--families", default="L1,L2,L3,L4",
-                           help="levels (dealt out evenly in each group): " + ",".join(D.FAMILIES))
+                           help="rule families (dealt out evenly in each group): " + ",".join(D.FAMILIES)
+                                + ".  boolintro.tiny's default also has maj,mux; ours stays L1-L4")
+            s.add_argument("--report-format", choices=list(D.REPORT_KINDS), default="formula",
+                           help="pretraining reports: the full regex, one weighted letter, or both")
             s.add_argument("--n-with-reports", type=int, default=None,
                            help="sweep mode: all n-pre-report + n-pre-choice pretraining characters are "
                                 "built as one group and only the first N keep their reports")
@@ -101,9 +108,10 @@ def run_eval(model, spec, dev, args, step, f_sum, f_chr):
             r.update(step=step, stage=args.stage)
             f.write(json.dumps(r) + "\n")
         f.flush()
+    p = D.KIND_PREFIX[D.report_kinds(spec)[0]]
     brief = "  ".join(f"{r['group']}/{r['level']}: dec={r['decision_acc']:.2f} "
-                      f"faith={r['faithfulness']:.2f} shuf={r['shuffled_faithfulness']:.2f} "
-                      f"parse={r['parse_rate']:.2f}" for r in summ)
+                      f"faith={r[p + 'faithfulness']:.2f} shuf={r[p + 'shuffled_faithfulness']:.2f} "
+                      f"parse={r[p + 'parse_rate']:.2f}" for r in summ)
     print(f"[eval step {step} {time.time() - t:.0f}s] {brief}", flush=True)
 
 
@@ -179,7 +187,7 @@ def pretrain(args):
     spec = D.build_spec(n_rep, n_cho, args.n_new, _fams(args.families), args.seed, args.n_eval,
                         args.holdout_rule_frac,
                         _fams(args.report_families) if args.report_families else None,
-                        args.n_with_reports)
+                        args.n_with_reports, report_format=args.report_format)
     if spec_path.exists() and D.load_spec(spec_path) != spec:
         raise SystemExit(f"{spec_path} exists with different settings; use a new --run-dir")
     D.save_spec(spec, spec_path)
@@ -190,7 +198,7 @@ def pretrain(args):
     print(f"model: {sum(p.numel() for p in model.parameters()) / 1e6:.2f}M params on {dev}, "
           f"vocab {D.vocab_size(spec)}", flush=True)
     sampler = D.Sampler(spec, D.ids_of(spec, ("pre_report", "pre_choice")),
-                        D.ids_of(spec, ("pre_report",)), seed=args.seed + 1)
+                        D.ids_of(spec, ("pre_report",)), seed=args.seed + 1, kinds=D.report_kinds(spec))
     next_batch = lambda: D.collate(sampler.batch(args.batch_size, args.report_frac), dev)  # noqa: E731
     train_loop(model, list(model.parameters()), next_batch, spec, dev, args, out)
     M.save(model, out / "model")
@@ -236,7 +244,7 @@ def finetune(args):
     rep_s = None
     if args.replay > 0:
         rep_s = D.Sampler(spec, D.ids_of(spec, ("pre_report", "pre_choice")),
-                          D.ids_of(spec, ("pre_report",)), seed=args.seed + 13)
+                          D.ids_of(spec, ("pre_report",)), seed=args.seed + 13, kinds=D.report_kinds(spec))
     n_rep = int(round(args.batch_size * args.replay))
 
     def next_batch():

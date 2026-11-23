@@ -13,13 +13,17 @@ Targets (regex counterparts of the boolean Fourier targets):
               the analog of the degree-1 "preference vector" P.
     lang      accept (+1) / reject (-1) on the 120 strings of length 1..4: the rule itself,
               extensionally (the analog of the full truth table).
-    template  one-hot of the 16 templates (4 per level): the rule's structure, letters aside.
+    template  one-hot of the templates (4 per level, then 2 for maj and 2 for mux when those
+              families are in the spec): the rule's structure, letters aside.  The one-hot
+              has 16 columns for an L1-L4 spec (as before) and 20 with maj / mux.
     x_letter  one-hot of the letter X the template is built around (a, b or c): the
-              letter-permutation part.  X is identifiable for every template (Y/Z need not be).
-template + x_letter pin down the language for L1, L4 and two L3 templates; for L2 and the
-other two L3 templates the Y/Z order still matters (2 languages per cell, 66 languages in
-all), which `lang` covers.  valence asks the Word2Vec question (is an additive summary stored
-linearly even when reports are never trained?).
+              letter-permutation part.  X is identifiable for every template (Y/Z need not be);
+              for maj it is the letter whose sign differs from the other two, for mux the
+              selector letter.
+template + x_letter pin down the language for L1, L4, maj and two L3 templates; for L2, mux
+and the other two L3 templates the Y/Z order still matters (2 languages per cell), which
+`lang` covers.  valence asks the Word2Vec question (is an additive summary stored linearly
+even when reports are never trained?).
 
 Probes are fit on the pretraining characters and scored
     pre_report, pre_choice   5-fold cross-validated
@@ -49,7 +53,7 @@ from . import data as D
 
 TARGETS = ("valence", "lang", "template", "x_letter")
 PROBE_MAX_LEN = 4
-N_TEMPLATES = sum(len(v) for v in grammars.TEMPLATES.values())
+N_TEMPLATES = sum(len(v) for v in grammars.TEMPLATES.values())  # the 16 level templates
 
 
 _HAS = np.array([[ch in s for s in grammars.universe()] for ch in grammars.ALPHABET])
@@ -70,7 +74,7 @@ def targets(spec) -> dict[str, np.ndarray]:
     short = [i for i, s in enumerate(grammars.universe()) if len(s) <= PROBE_MAX_LEN]
     out = {"valence": np.array([valence(c["rule"]) for c in chars]),
            "lang": np.array([np.where(grammars.language(c["rule"])[short], 1.0, -1.0) for c in chars])}
-    tmpl = np.zeros((len(chars), N_TEMPLATES))
+    tmpl = np.zeros((len(chars), max([N_TEMPLATES] + [c["template_id"] + 1 for c in chars])))
     tmpl[np.arange(len(chars)), [c["template_id"] for c in chars]] = 1.0
     xl = np.zeros((len(chars), len(grammars.ALPHABET)))
     xl[np.arange(len(chars)), [grammars.ALPHABET.index(c["x_letter"]) for c in chars]] = 1.0

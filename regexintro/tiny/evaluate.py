@@ -12,8 +12,18 @@ them in one pass per report (each report's match vector is computed once, and fu
 equivalence is only checked for reports that already agree with the target on every eval
 string); tests check it equals regexintro.metrics.character_metrics.
 
-Reports are decoded over report tokens only (letters and regex symbols, format-constrained),
-so an unparsable report is a malformed regex, not chatter.
+Per-letter metrics, as in boolintro.tiny.evaluate (sign_ok, rel_mentioned, irr_mentioned,
+val_corr_avg, assoc_ceiling, degree1_mass), with the regex definitions of regexintro.diagnose:
+    sign_ok, rel_split, irr_split, val_corr_avg      per report kind
+    assoc_ceiling, presence_r2                       per character
+
+Report kinds (the spec's report format): formula reports keep the unprefixed names above;
+attribute reports ("b" / "NOT b", scored as the one-letter rule they state) carry the prefix
+"attribute_" (attribute_faithfulness, attribute_shuffled_faithfulness, ...), the
+counterpart of boolintro's <kind>_ prefix.
+
+Reports are decoded over the kind's tokens only (format-constrained), so an unparsable report
+is a malformed regex or statement, not chatter.
 
 Shuffled baseline: a character's reports scored against the behaviour of up to `n_peers`
 other characters of the same group and family whose language differs (the main experiment
@@ -22,14 +32,19 @@ uses all such peers; a sample keeps the many-character pretraining evals fast).
 
 from __future__ import annotations
 
+import functools
 import math
 from collections import defaultdict
 
 import numpy as np
 import torch
 
-from .. import grammars, metrics
+from boolintro.boolfn import corr
+
+from .. import diagnose, grammars, metrics
 from . import data as D
+
+LETTER_KEYS = ("sign_ok", "rel_split", "irr_split")
 
 
 def _nanmean(xs):
@@ -68,20 +83,22 @@ def _last_logits(model, x: torch.Tensor) -> torch.Tensor:
 
 @torch.no_grad()
 def generate_reports(model, cids, device, n_samples: int, temperature: float, seed: int,
-                     batch: int = 4096) -> dict[int, tuple[list[int], list[list[int]]]]:
+                     batch: int = 4096, kind: str = "formula") -> dict[int, tuple[list[int], list[list[int]]]]:
     """Per character: (greedy report tokens, [sampled report tokens])."""
     g = torch.Generator(device=device).manual_seed(seed)
     allowed = torch.full((model.config.vocab_size,), float("-inf"), device=device)
-    allowed[[D.TOK[t] for t in D.REPORT_TOKENS] + [D.EOS]] = 0.0
+    tokens = D.REPORT_TOKENS if kind == "formula" else D.ATT_TOKENS
+    allowed[[D.TOK[t] for t in tokens] + [D.EOS]] = 0.0
+    max_len = D.MAX_RULE_LEN if kind == "formula" else D.MAX_ATT_LEN
     per = 1 + n_samples
     owners = np.repeat(np.asarray(cids, dtype=np.int64), per)
     greedy_row = np.tile(np.arange(per) == 0, len(cids))
     seqs = []
     for i in range(0, len(owners), batch):
-        x = torch.from_numpy(D.report_prompts(owners[i:i + batch])).to(device)
+        x = torch.from_numpy(D.report_prompts(owners[i:i + batch], kind)).to(device)
         greedy = torch.from_numpy(greedy_row[i:i + batch]).to(device)
         done = torch.zeros(len(x), dtype=torch.bool, device=device)
-        for _ in range(D.MAX_RULE_LEN):
+        for _ in range(max_len):
             lg = _last_logits(model, x) + allowed
             samp = torch.multinomial(torch.softmax(lg / max(temperature, 1e-6), -1), 1, generator=g)[:, 0]
             nxt = torch.where(greedy, lg.argmax(-1), samp)
@@ -131,30 +148,83 @@ def score_character(rule: str, strings, p_accept, reports) -> dict:
     }
 
 
+# ----------------------------------------------------------------------------- per-letter view
+@functools.lru_cache(maxsize=None)
+def _letters(rx: str) -> tuple[np.ndarray, np.ndarray]:
+    lang = grammars.language(rx)
+    return diagnose.valence(lang), diagnose.split_pairs(lang)
+
+
+def letter_stats(rx: str, rule: str) -> dict:
+    """regexintro.diagnose.letter_stats(language(rx), language(rule)), cached per regex."""
+    vt, st = _letters(rule)
+    vr, sr = _letters(rx)
+    both = (np.abs(vt) >= diagnose.LETTER_FLOOR) & (np.abs(vr) >= diagnose.LETTER_FLOOR)
+    return {"sign_ok": float((np.sign(vr[both]) == np.sign(vt[both])).mean()) if both.any() else math.nan,
+            "rel_split": float(sr[st].mean()) if st.any() else math.nan,
+            "irr_split": float(sr[~st].mean()) if (~st).any() else math.nan}
+
+
+def letter_block(rule: str, ok: list[str]) -> dict:
+    sts = [letter_stats(r, rule) for r in ok]
+    row = {k: _nanmean([s[k] for s in sts]) for k in LETTER_KEYS}
+    row["val_corr_avg"] = corr(np.mean([_letters(r)[0] for r in ok], 0), _letters(rule)[0]) if ok else math.nan
+    return row
+
+
+@functools.lru_cache(maxsize=None)
+def _presence_r2(rule: str) -> float:
+    return diagnose.presence_r2(grammars.language(rule))
+
+
+# ----------------------------------------------------------------------------- evaluation
+def _parse(kind: str, toks) -> str | None:
+    return D.parse_tokens(toks) if kind == "formula" else D.parse_attribute(toks)
+
+
+def _decode(kind: str, toks) -> str:
+    return D.decode_rule(toks) if kind == "formula" else D.decode_attribute(toks)
+
+
 def evaluate(model, spec, groups, device, n_samples: int = 8, temperature: float = 1.0,
              seed: int = 0, n_peers: int = 3) -> tuple[list[dict], list[dict]]:
     """Returns (per-character rows, per (group, family) summary rows)."""
     model.eval()
     chars = spec["characters"]
     cids = D.ids_of(spec, groups)
+    kinds = D.report_kinds(spec)
     p_accept = decision_p_accept(model, spec, cids, device)
-    reps = generate_reports(model, cids, device, n_samples, temperature, seed)
+    reps = {k: generate_reports(model, cids, device, n_samples, temperature, seed + i, kind=k)
+            for i, k in enumerate(kinds)}
     model.train()
 
-    per, ok_of, beh_of = [], {}, {}
+    per, ok_of, beh_of = [], defaultdict(dict), {}
     for cid in cids:
         c = chars[cid]
-        greedy_toks, sample_toks = reps[cid]
-        parsed = [D.parse_tokens(t) for t in sample_toks]
-        m = {"id": cid, "group": c["group"], "level": c["level"], "rule": c["rule"]}
-        m.update(score_character(c["rule"], c["eval_strings"], p_accept[cid], parsed))
-        g = D.parse_tokens(greedy_toks)
         beh = np.asarray(p_accept[cid]) > 0.5
-        m["greedy_report"] = D.decode_rule(greedy_toks)
-        m["greedy_faithfulness"] = metrics.agreement(g, c["eval_strings"], beh) if g is not None else math.nan
-        m["greedy_exact"] = float(grammars.equivalent(g, c["rule"])) if g is not None else math.nan
+        m = {"id": cid, "group": c["group"], "level": c["level"], "rule": c["rule"]}
+        for k in kinds:
+            p = D.KIND_PREFIX[k]
+            greedy_toks, sample_toks = reps[k][cid]
+            parsed = [_parse(k, t) for t in sample_toks]
+            ok = [r for r in parsed if r is not None]
+            sc = score_character(c["rule"], c["eval_strings"], p_accept[cid], parsed)
+            if p:  # decision metrics are the same for every kind: keep them unprefixed
+                sc = {key: v for key, v in sc.items()
+                      if key not in ("decision_acc", "decision_p_target", "model_accept_rate", "n_error_pairs")}
+            m.update({p + key: v for key, v in sc.items()})
+            m.update({p + key: v for key, v in letter_block(c["rule"], ok).items()})
+            g = _parse(k, greedy_toks)
+            m[p + "greedy_report"] = _decode(k, greedy_toks)
+            m[p + "greedy_faithfulness"] = metrics.agreement(g, c["eval_strings"], beh) if g is not None else math.nan
+            m[p + "greedy_exact"] = float(grammars.equivalent(g, c["rule"])) if g is not None else math.nan
+            ok_of[k][cid] = ok
+        if "decision_acc" not in m:  # no kinds at all
+            m.update({key: v for key, v in score_character(c["rule"], c["eval_strings"], p_accept[cid], []).items()
+                      if key in ("decision_acc", "decision_p_target", "model_accept_rate", "n_error_pairs")})
+        m["assoc_ceiling"] = diagnose.assoc_ceiling(D.universe_index(c["eval_strings"]), beh)
+        m["presence_r2"] = _presence_r2(c["rule"])
         per.append(m)
-        ok_of[cid] = [r for r in parsed if r is not None]
         beh_of[cid] = beh
 
     rng = np.random.default_rng(seed)
@@ -168,11 +238,14 @@ def evaluate(model, spec, groups, device, n_samples: int = 8, temperature: float
                      and chars[d["id"]]["signature"] != c["signature"]]
             if len(peers) > n_peers:
                 peers = list(rng.choice(peers, n_peers, replace=False))
-            m["shuffled_faithfulness"] = _nanmean(
-                [metrics.mean_over_reports(ok_of[c["id"]], chars[j]["eval_strings"], beh_of[j]) for j in peers])
+            for k in kinds:
+                m[D.KIND_PREFIX[k] + "shuffled_faithfulness"] = _nanmean(
+                    [metrics.mean_over_reports(ok_of[k][c["id"]], chars[j]["eval_strings"], beh_of[j])
+                     for j in peers])
 
     summ = []
-    num = [k for k in per[0] if k not in ("id", "group", "level", "rule", "greedy_report")] if per else []
+    num = [k for k in per[0] if k not in ("id", "group", "level", "rule") and not k.endswith("greedy_report")] \
+        if per else []
     for (grp, lv), ms in sorted(by_gl.items()):
         row = {"group": grp, "level": lv, "n": len(ms)}
         for key in num:
