@@ -85,6 +85,8 @@ def get_args(argv=None):
     p.add_argument("--models", default="ft,base")
     p.add_argument("--quant", choices=["none", "8bit", "4bit"], default=None)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--prefill", action="store_true",
+                   help=f"start each report answer with {prompts.REPORT_PREFILL!r}")
     return p.parse_args(argv)
 
 
@@ -247,7 +249,8 @@ def run_chunk(model, tok, chunk, ks, args, which: str) -> list[dict]:
                 dec_texts.append(_render(tok, with_record(rec, prompts.decision_user(char, s, "reject"))))
                 dec_index.append((ci, cond, k))
             for s in items["report_strings"]:
-                rep_texts.append(_render(tok, with_record(rec, prompts.report_user(char, s))))
+                rep_texts.append(_render(tok, with_record(rec, prompts.report_user(char, s)))
+                                 + (prompts.REPORT_PREFILL if getattr(args, "prefill", False) else ""))
                 rep_index.append((ci, cond, k))
         for framing in DETECT_FRAMINGS:
             for kind in ("genuine", "forged"):

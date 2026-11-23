@@ -52,6 +52,8 @@ def get_args(argv=None):
     p.add_argument("--char-limit", type=int, default=0, help="evaluate only the first N characters")
     p.add_argument("--quant", choices=["none", "8bit", "4bit"], default=None)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--prefill", action="store_true",
+                   help=f"start each self-report and observer answer with {prompts.REPORT_PREFILL!r}")
     return p.parse_args(argv)
 
 
@@ -154,10 +156,11 @@ def main(argv=None):
     model.config.use_cache = True
 
     # Fixed report contexts (identical across checkpoints).
+    prefill = prompts.REPORT_PREFILL if args.prefill else ""
     rep_texts, rep_owner = [], []
     for ci, c in enumerate(chars):
         for s in data.report_contexts(c, args.n_reports, spec["seed"]):
-            rep_texts.append(modeling.render(tok, prompts.report_user(c, s), prompts.SYSTEM))
+            rep_texts.append(modeling.render(tok, prompts.report_user(c, s), prompts.SYSTEM) + prefill)
             rep_owner.append(ci)
     obs_shown = [data.observer_strings(c, args.observer_k, spec["seed"]) for c in chars]
 
@@ -178,7 +181,7 @@ def main(argv=None):
             obs_texts, obs_owner = [], []
             for ci, c in enumerate(chars):
                 ex = [(s, p > 0.5) for s, p in zip(obs_shown[ci], p_shown[ci])]
-                txt = modeling.render(tok, prompts.observer_user(c, ex), prompts.SYSTEM)
+                txt = modeling.render(tok, prompts.observer_user(c, ex), prompts.SYSTEM) + prefill
                 obs_texts += [txt] * args.observer_n
                 obs_owner += [ci] * args.observer_n
             with lora.disabled(model):
@@ -188,6 +191,8 @@ def main(argv=None):
         result = {"step": step, "task": "regex", "model": model_name, "n_reports": args.n_reports,
                   "temperature": args.temperature, "observer": step in obs_steps,
                   "per_character": per_char}
+        if args.prefill:
+            result["report_prefill"] = prompts.REPORT_PREFILL
         with open(out_dir / f"step_{step:06d}_reports.jsonl", "w") as f:
             for ci, c in enumerate(chars):
                 f.write(json.dumps({"id": c["id"], "name": c["name"], "rule": c["rule"],

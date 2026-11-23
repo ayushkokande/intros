@@ -36,6 +36,13 @@ OBSERVER_HEADER = (
 )
 
 
+# Optional start of the assistant turn for report and observer prompts (`--prefill` in
+# regexintro.evaluate / regexintro.conflict).  After long training on the decision task the adapter
+# tends to answer a report prompt with "Yes"/"No"; starting the answer here rules that out as the
+# first token.  Off by default, so the default protocol matches boolintro's.
+REPORT_PREFILL = "Regular expression:"
+
+
 def show(s: str) -> str:
     return " ".join(s)
 
