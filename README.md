@@ -106,7 +106,7 @@ differences are listed below.
 
 **1. Copy the code** (from the laptop):
 ```bash
-bash cluster/sync_to_torch.sh          # -> /scratch/kk6081/intros
+bash cluster/sync_to_torch.sh          # -> /scratch/$TORCH_USER/intros
 ```
 
 **2. Environment.** By default this **reuses the probe_conf overlay**
@@ -307,10 +307,58 @@ python -m boolintro.crossmodel evaluate --exp runs/xm/L1 --m2-run runs/xm/L1/m2_
 python -m boolintro.crossmodel summarize --exps runs/xm/* --out runs/xm/summary
 ```
 
-On Torch, after the main experiment: `sbatch --account="$TORCH_ACCOUNT" --chdir="$REPO" --array=1-4
---export=ALL,OTHER_MODEL=mistralai/Mistral-Small-24B-Instruct-2501 cluster/60_crossmodel.sbatch`
-(header has the role swap). **Seeds:** one M1 run per seed (`TRAIN_ARGS="--seed 2026"
-TAG=qwen3-32b-s2026`); `summarize` pools them and lists each seed's gap.
+**Running it on NYU Torch, step by step.** Replace `<netid>` with your NYU NetID.
+
+1. **Log in and get the code** (login node):
+   ```bash
+   ssh <netid>@login.torch.hpc.nyu.edu
+   cd /scratch/$USER
+   git clone https://github.com/ayushkokande/intros.git && cd intros
+   git checkout cross-model-introspection
+   mkdir -p logs
+   ```
+2. **Your settings.** Find your Slurm account with `my_slurm_accounts`. Then put these lines in
+   `~/.bashrc` (or run them in every new shell):
+   ```bash
+   export TORCH_ACCOUNT=<your account>       # the default in env.sh is Keshav's
+   export MAIL_USER=<netid>@nyu.edu          # optional: an e-mail when a job ends or fails
+   source /scratch/$USER/intros/cluster/env.sh
+   ```
+3. **Python environment** (one time). If you have Keshav's `probe_conf` overlay at
+   `/scratch/$USER/section33_overlay-15GB-500K.ext3`, skip this. Otherwise build your own,
+   following the header of `cluster/01_setup_overlay.sh` (about 20 minutes). `env.sh` finds it
+   at `/scratch/$USER/intros_overlay-15GB-500K.ext3`.
+4. **Hugging Face login and model downloads** (login node; compute nodes have no internet).
+   Gated models (all Llama models) need you to accept the licence on huggingface.co first:
+   ```bash
+   bash cluster/run.sh hf auth login         # paste a read token from huggingface.co/settings/tokens
+   EXTRA_MODELS="mistralai/Mistral-Small-24B-Instruct-2501 HuggingFaceTB/SmolLM2-360M-Instruct" \
+     bash cluster/02_prefetch.sh             # + Qwen3-32B and Qwen3-0.6B; ~115 GB into /scratch/$USER/hf_cache
+   ```
+5. **Smoke test first** (about 30 minutes on any GPU). This is the first run with real models:
+   ```bash
+   sbatch --account="$TORCH_ACCOUNT" --chdir="$REPO" "${SBATCH_MAIL[@]}" cluster/04_xm_smoke.sbatch
+   squeue --me                                # then: cat $RUNS_ROOT/xm_smoke_*/summary/report.md
+   ```
+6. **The full experiment**, one command. It trains Qwen3-32B and Mistral-24B as self models on
+   all four levels. Each then gets a same-model outsider and a cross-family outsider (the 2 x 2
+   with the role swap), followed by the summary:
+   ```bash
+   bash cluster/submit_crossmodel.sh                          # seed 2025
+   SEEDS="2025 2026 2027" bash cluster/submit_crossmodel.sh   # three seeds
+   ```
+   Each self or outsider training is one H200 job of about 4 to 6 hours, with 4 levels in
+   parallel. One seed is about 16 training jobs. Existing finished runs with the same tag are
+   reused, not retrained. For 8B models on L40S GPUs use `SELF_MODEL=Qwen/Qwen3-8B SELF_TAG=qwen3-8b
+   OTHER_MODEL=meta-llama/Llama-3.1-8B-Instruct OTHER_TAG=llama3.1-8b
+   SBATCH_EXTRA="--constraint=l40s|h200"`. The header of `cluster/submit_crossmodel.sh` lists
+   every option. If a job fails, fix the cause and rerun the same command: finished stages are skipped.
+7. **The GPT-2 version** (one L40S job per seed, a few hours each):
+   ```bash
+   sbatch --account="$TORCH_ACCOUNT" --chdir="$REPO" "${SBATCH_MAIL[@]}" --array=0-2 cluster/52_tiny_crossmodel.sbatch
+   ```
+8. **Results.** `$RUNS_ROOT/xm_summary/report.md` holds the main table. To copy results to your
+   laptop: `TORCH_USER=<netid> bash cluster/sync_from_torch.sh`.
 
 Choosing the other family: pick a model of similar size with `q_proj ... down_proj` layer
 names and single-token "A"/"B" (Llama, Mistral and Gemma all qualify). Mistral-Small-24B

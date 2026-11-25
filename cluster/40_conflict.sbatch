@@ -22,8 +22,6 @@
 #SBATCH --time=16:00:00
 #SBATCH --output=logs/bi-conflict-%A_%a.out
 #SBATCH --error=logs/bi-conflict-%A_%a.err
-#SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=kk6081@nyu.edu
 set -euo pipefail
 source "${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}/cluster/job_common.sh"
 resolve_levels

@@ -14,8 +14,6 @@
 #SBATCH --time=00:30:00
 #SBATCH --output=logs/bi-analyze-%j.out
 #SBATCH --error=logs/bi-analyze-%j.err
-#SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=kk6081@nyu.edu
 set -euo pipefail
 REPO="${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}"
 source "$REPO/cluster/env.sh"

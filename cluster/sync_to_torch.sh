@@ -5,7 +5,8 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="${SRC:-$(dirname "$HERE")}"
-DEST="${TORCH_DEST:-kk6081@dtn.torch.hpc.nyu.edu:/scratch/kk6081/intros/}"
+TORCH_USER="${TORCH_USER:-$USER}"   # your NYU NetID
+DEST="${TORCH_DEST:-$TORCH_USER@dtn.torch.hpc.nyu.edu:/scratch/$TORCH_USER/intros/}"
 OPTS=(-avz --progress --exclude '.venv/' --exclude 'runs/' --exclude 'results/' --exclude 'logs/*.out' --exclude 'logs/*.err'
       --exclude '__pycache__/' --exclude '.pytest_cache/' --exclude '*.pdf')
 [ "${DRY_RUN:-0}" = "1" ] && OPTS+=(--dry-run)
