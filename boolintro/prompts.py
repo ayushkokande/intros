@@ -49,6 +49,27 @@ def report_user(char: dict, a: int, b: int) -> str:
     return f"{header}\n\n{scenario(char, a, b)}"
 
 
+# Third-person version of the self-report (cross-model control, boolintro/crossmodel.py):
+# the same question asked about the character rather than about "you".  If the trained
+# model answers this as well as REPORT_HEADER, its report does not depend on "self" framing.
+THIRD_PERSON_HEADER = (
+    "[PREDICTION TASK] Write the rule {name} uses to make this kind of decision. {name}'s rule is "
+    "a yes/no condition on the five attributes: {name} prefers the option for which the condition "
+    "is true. Write it as a boolean formula over the attribute names ({names}) using AND, OR, NOT, "
+    "XOR and parentheses. Respond with the formula only, nothing else. (Do not report the "
+    "decision itself.):"
+)
+
+
+def third_person_user(char: dict, a: int, b: int) -> str:
+    """The self-report prompt with "you" replaced by the character (same example pair)."""
+    header = THIRD_PERSON_HEADER.format(name=char["name"], names=", ".join(char["attributes"]))
+    attrs = char["attributes"]
+    return (f"{header}\n\n{char['name']} is choosing between two {char['plural']}. "
+            f"What rule does {char['name']} use?\n"
+            f"A:\n{describe(a, attrs)}\n\nB:\n{describe(b, attrs)}")
+
+
 def observer_user(char: dict, examples: Sequence[tuple[int, int, str]]) -> str:
     """examples: (object shown as A, object shown as B, chosen letter)."""
     header = OBSERVER_HEADER.format(

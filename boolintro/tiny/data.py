@@ -268,7 +268,10 @@ def report_prompts(cids, kind: str = "formula") -> np.ndarray:
 class Sampler:
     """Vectorised training batches: decisions for `choice_ids`, reports for `report_ids`."""
 
-    def __init__(self, spec: dict, choice_ids, report_ids, seed: int, kinds=("formula",)):
+    def __init__(self, spec: dict, choice_ids, report_ids, seed: int, kinds=("formula",),
+                 prefer: dict[int, dict] | None = None):
+        """prefer: optional {character id: {sorted pair: chosen object}} replacing the rule's
+        labels for those characters (e.g. another model's recorded choices)."""
         self.rng = np.random.default_rng(seed)
         chars = spec["characters"]
         self.choice_ids = np.asarray(choice_ids, dtype=np.int64)
@@ -279,7 +282,10 @@ class Sampler:
         pref = []
         for c, t in zip(self.choice_ids, tabs):
             tt = chars[c]["truth_table"]
-            pref.extend(a if (tt >> a) & 1 else b for a, b in t)
+            if prefer is not None and int(c) in prefer:
+                pref.extend(prefer[int(c)][(int(a), int(b))] for a, b in t)
+            else:
+                pref.extend(a if (tt >> a) & 1 else b for a, b in t)
         self.pref = np.asarray(pref, dtype=np.int64)
         # report sources per kind: {kind: (ids, sampler(cid) -> token list)}
         self.kinds = []

@@ -70,11 +70,13 @@ boolintro/
   train.py     multi-character adapter training (resumable)
   evaluate.py  checkpoint evaluation + controls (resumable)
   analyze.py   tables, bootstrap CIs, figures
+  crossmodel.py  self vs. outsider (Looking Inward): M1's choices -> outsider M2, gap per level
   rescore.py   recompute metrics from saved decisions + raw reports (no GPU), e.g. after a parser fix
   preview.py   print a spec and example prompts (no GPU)
   boolfn.py    Fourier view of rules (degree-1 'preference vector' vs. interactions), report stats
   diagnose.py  attribute-level diagnosis of saved self-reports (no GPU)
-  tiny/        from-scratch GPT-2 sandbox: data, model, train (pretrain/finetune), evaluate, probe, analyze
+  tiny/        from-scratch GPT-2 sandbox: data, model, train (pretrain/finetune), evaluate, probe, analyze,
+               crossmodel (fast self-vs-outsider version)
 tests/         rule/parser/metric tests
 cluster/       NYU Torch (Slurm + Apptainer) scripts
 ```
@@ -244,6 +246,86 @@ class-2 decision accuracy and faithfulness against N:
 
     sbatch --account="$TORCH_ACCOUNT" --chdir="$REPO" --array=0-5 cluster/51_tiny_sweep.sbatch
     python -m boolintro.tiny.sweep --runs runs/tiny/sweep_n*_s* --out runs/tiny_sweep
+
+## Self vs. outsider: does the model know itself better than someone watching it?
+
+This follows *Looking Inward* (Binder et al. 2024, arXiv 2410.13787), with the boolean task.
+
+**The idea in plain words.** The trained model (the **self**, M1) makes choices for each
+character. We then train a second model (the **outsider**, M2) on M1's own choices. We do
+*not* use the hidden rules for this. So the outsider has seen exactly how M1 behaves. Then we
+ask both the same question, "what rule do you use?", and check whose answer predicts M1's
+held-out choices better.
+
+- If M1 wins, M1 has some access to itself that you cannot get just from watching its
+  behaviour. That is evidence of introspection.
+- If they tie, M1's self-report could just be what anyone would infer from its choices.
+
+**Two kinds of outsider, reported side by side.**
+
+| condition | outsider | what it tests |
+|---|---|---|
+| `same` | a fresh LoRA on the *same* base model as M1 (e.g. Qwen3 for Qwen3) | the cleanest test: same starting weights, same data, only "trained on the rules" vs. "trained on M1's choices" differs. The rules are random, so there is no pretraining quirk to exploit |
+| `other` | a different model family (e.g. Mistral or Llama for Qwen3) | the setting of the paper. A different family might be worse at describing *any* rule, so this gap mixes self-access with model differences |
+
+**Role swap** (robustness, as in the paper): train the other family as a self model on the
+rules too, and use Qwen3 as *its* outsider. If the self always wins, whichever model plays it,
+the gap is not just "Qwen3 writes better formulas".
+
+**Third-person control.** M1 is also asked "What rule does Prometheus use?" instead of "What
+rule do you use?". If this works as well as the first-person question, the self-report does
+not depend on the model thinking about "itself".
+
+**What gets measured** (per character, then averaged per level):
+
+| number | meaning |
+|---|---|
+| `m1_self_faithfulness` | M1's report vs. M1's held-out choices (same metric as above) |
+| `m2_self_faithfulness` | the outsider's report vs. **M1's** held-out choices |
+| `gap` | M1 − M2. **The main number.** > 0 means the self knows itself better |
+| `third_person_gap` | M1 first-person − M1 third-person |
+| `m2_agree_m1` | how often the outsider makes the same choice as M1 on held-out pairs. If this is low, the outsider never learned M1's behaviour and the gap means little |
+| `*_report_target_agreement` | each report vs. the true hidden rule |
+| `gap_error_pairs` | the gap only on pairs where M1's choice differs from its rule. Here a report cannot score well by guessing the rule; it must describe what M1 actually does |
+| `m2_self_own_faithfulness` | the outsider's report vs. its *own* choices |
+
+`summarize` writes `report.md` (the gap for every pairing side by side per level, with 95%
+bootstrap CIs over characters and each seed's mean), `summary.csv`, `by_seed.csv`,
+`per_character.csv` and `gap_per_character.png` (a histogram of per-character gaps).
+
+**Running it** (Hugging Face models; see `boolintro/crossmodel.py` for every option):
+
+```bash
+# M1 = an existing run, e.g. runs/L1 from boolintro.train
+python -m boolintro.crossmodel record --m1-run runs/L1 --exp runs/xm/L1        # M1's own choices
+python -m boolintro.train --run-dir runs/xm/L1/m2_same  --model Qwen/Qwen3-32B --init-seed 1 \
+    --spec-from runs/xm/L1/spec.json --labels-from runs/xm/L1/m1_choices.json
+python -m boolintro.train --run-dir runs/xm/L1/m2_other --model mistralai/Mistral-Small-24B-Instruct-2501 \
+    --spec-from runs/xm/L1/spec.json --labels-from runs/xm/L1/m1_choices.json
+python -m boolintro.crossmodel evaluate --exp runs/xm/L1 --m2-run runs/xm/L1/m2_same
+python -m boolintro.crossmodel evaluate --exp runs/xm/L1 --m2-run runs/xm/L1/m2_other
+python -m boolintro.crossmodel summarize --exps runs/xm/* --out runs/xm/summary
+```
+
+On Torch, after the main experiment: `sbatch --account="$TORCH_ACCOUNT" --chdir="$REPO" --array=1-4
+--export=ALL,OTHER_MODEL=mistralai/Mistral-Small-24B-Instruct-2501 cluster/60_crossmodel.sbatch`
+(header has the role swap). **Seeds:** one M1 run per seed (`TRAIN_ARGS="--seed 2026"
+TAG=qwen3-32b-s2026`); `summarize` pools them and lists each seed's gap.
+
+Choosing the other family: pick a model of similar size with `q_proj ... down_proj` layer
+names and single-token "A"/"B" (Llama, Mistral and Gemma all qualify). Mistral-Small-24B
+is the closest open instruct model to Qwen3-32B; Llama-3.1-8B-Instruct pairs with Qwen3-8B.
+Llama weights are gated on Hugging Face (accept the licence first).
+
+**Fast version on a laptop CPU** (from-scratch GPT-2s, no downloads): three small GPT-2s per
+seed, all pretrained on the same data. A (4 layers × 128) is the self. A2 has the same size
+but different starting weights (outsider `same`). B (2 layers × 256) is outsider `other`, and
+also a self in the role swap. There is no prose, so no third-person prompt here.
+
+```bash
+python -m boolintro.tiny.crossmodel run --exp runs/tiny_xm/s0 --seed 0      # repeat for s1, s2
+python -m boolintro.crossmodel summarize --exps runs/tiny_xm/s*/self_* --out runs/tiny_xm/summary
+```
 
 ## Output files per run (`$RUNS_ROOT/<tag>_L<level>/`)
 

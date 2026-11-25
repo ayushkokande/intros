@@ -6,6 +6,12 @@ character's hidden boolean rule.  Self-report is never trained.
     python -m boolintro.train --run-dir runs/L1 --model Qwen/Qwen3-32B --levels 1
 
 Resumable: rerunning the same command continues from the last saved step.
+
+Cross-model control (boolintro.crossmodel): train a second model "M2" on the first
+model's recorded choices instead of the rule labels, on the same characters and pairs:
+
+    python -m boolintro.train --run-dir runs/xm/L1_m2 --model meta-llama/Llama-3.1-8B-Instruct \
+        --spec-from runs/L1/spec.json --labels-from runs/xm/L1/m1_choices.json
 """
 
 from __future__ import annotations
@@ -57,6 +63,15 @@ def get_args(argv=None):
     p.add_argument("--log-every", type=int, default=10)
     p.add_argument("--quant", choices=["none", "8bit", "4bit"], default="none")
     p.add_argument("--no-grad-ckpt", action="store_true")
+    p.add_argument("--spec-from", type=Path, default=None,
+                   help="reuse this spec.json (same characters, rules and pair split); --levels and "
+                        "--seed are taken from it")
+    p.add_argument("--labels-from", type=Path, default=None,
+                   help="m1_choices.json from `boolintro.crossmodel record`: train on that model's "
+                        "choices instead of the rule labels (the M2 of the cross-model control)")
+    p.add_argument("--init-seed", type=int, default=None,
+                   help="seed for the LoRA initialisation only (default --seed).  Gives a fresh adapter "
+                        "on the same characters and data order, e.g. a same-model M2")
     p.add_argument("--train-eos", action="store_true",
                    help="also train the end-of-turn token after the letter (standard chat SFT); "
                         "default trains only the A/B token, as the eval reads one token")
@@ -78,9 +93,14 @@ def main(argv=None):
     args = get_args(argv)
     run = args.run_dir
     run.mkdir(parents=True, exist_ok=True)
+    spec_path = run / "spec.json"
+    if args.spec_from is not None:
+        src = data.load_spec(args.spec_from)
+        args.levels, args.seed = ",".join(map(str, src["levels"])), src["seed"]
+        if not spec_path.exists():
+            data.save_spec(src, spec_path)
     levels = tuple(int(x) for x in args.levels.split(","))
 
-    spec_path = run / "spec.json"
     if spec_path.exists():
         spec = data.load_spec(spec_path)
         if tuple(spec["levels"]) != levels or spec["seed"] != args.seed:
@@ -101,10 +121,12 @@ def main(argv=None):
         # Continuing an existing run: the optimizer and scheduler are restored from the saved
         # state, so changed hyperparameters would be silently ignored.  Only --steps may grow.
         saved = json.loads(cfg_path.read_text())
+        saved.setdefault("labels_from", None)
+        saved.setdefault("init_seed", None)
         fixed = ["model", "lr", "warmup", "scheduler", "weight_decay", "rank", "alpha", "layers",
-                 "batch_size", "micro_batch", "quant", "train_eos"]
-        diff = {k: (saved.get(k), getattr(args, k)) for k in fixed
-                if k in saved and saved.get(k) != getattr(args, k)}
+                 "batch_size", "micro_batch", "quant", "train_eos", "labels_from", "init_seed"]
+        now = {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()}
+        diff = {k: (saved.get(k), now[k]) for k in fixed if k in saved and saved.get(k) != now[k]}
         if diff:
             raise SystemExit(f"{run} was trained with different settings {diff} (saved, given); "
                              "use a new --run-dir for a different configuration")
@@ -122,7 +144,7 @@ def main(argv=None):
 
     print(f"loading {args.model} (quant={args.quant})", flush=True)
     model, tok = modeling.load(args.model, args.quant)
-    torch.manual_seed(args.seed)
+    torch.manual_seed(args.seed if args.init_seed is None else args.init_seed)
     lcfg = lora.inject(model, args.rank, args.alpha, layers=parse_layers(args.layers))
     lcfg["base_model"] = args.model
     params = lora.lora_parameters(model)
@@ -151,7 +173,12 @@ def main(argv=None):
 
     ia, ib = modeling.letter_ids(tok)
     eot = modeling.end_of_turn_id(tok)
-    stream = data.training_stream(spec, args.steps * args.batch_size, seed=args.seed + 1)
+    prefer = None
+    if args.labels_from is not None:
+        from . import crossmodel
+        prefer = crossmodel.load_preferences(args.labels_from, spec)
+        print(f"labels: recorded choices from {args.labels_from} (not the rules)", flush=True)
+    stream = data.training_stream(spec, args.steps * args.batch_size, seed=args.seed + 1, prefer=prefer)
     chars = spec["characters"]
     dev = modeling.input_device(model)
     log = open(run / "train_log.jsonl", "a")
