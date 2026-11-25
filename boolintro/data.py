@@ -84,11 +84,16 @@ def load_spec(path: Path) -> dict:
     return spec
 
 
-def training_stream(spec: dict, n_examples: int, seed: int):
+def training_stream(spec: dict, n_examples: int, seed: int, prefer: list[dict] | None = None):
     """Deterministic list of (char_index, shown_A, shown_B, label_letter).
 
     Characters are drawn uniformly; a training pair is drawn uniformly from
     the character's train split and shown in random order.
+
+    By default the label is the character's hidden rule.  With `prefer` (one dict per
+    character mapping a sorted pair (a, b) to the chosen object), labels come from those
+    choices instead, e.g. another model's recorded behaviour (boolintro.crossmodel).
+    The pairs and their order are the same either way; only the labels change.
     """
     rng = random.Random(seed)
     chars = spec["characters"]
@@ -99,7 +104,11 @@ def training_stream(spec: dict, n_examples: int, seed: int):
         a, b = rng.choice(chars[ci]["train_pairs"])
         if rng.random() < 0.5:
             a, b = b, a
-        label = "A" if target_choice(rule_cache[ci], a, b) == a else "B"
+        if prefer is None:
+            chosen = target_choice(rule_cache[ci], a, b)
+        else:
+            chosen = prefer[ci][(min(a, b), max(a, b))]
+        label = "A" if chosen == a else "B"
         out.append((ci, a, b, label))
     return out
 

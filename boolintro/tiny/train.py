@@ -70,6 +70,10 @@ def get_args(argv=None):
             s.add_argument("--holdout-rule-frac", type=float, default=0.0,
                            help="reserve this fraction of rules for new characters only")
             s.add_argument("--report-frac", type=float, default=0.25, help="share of each batch that is reports")
+            s.add_argument("--model-seed", type=int, default=None,
+                           help="initialisation and data-order seed (default --seed).  The spec always "
+                                "uses --seed, so a second model on the same characters can differ "
+                                "only in its weights (M2 of boolintro.tiny.crossmodel)")
             s.add_argument("--n-layer", type=int, default=6)
             s.add_argument("--n-embd", type=int, default=256)
             s.add_argument("--n-head", type=int, default=8)
@@ -80,6 +84,9 @@ def get_args(argv=None):
             s.add_argument("--replay", type=float, default=0.0,
                            help="share of each batch drawn from stage-1 data (choices + reports)")
             s.add_argument("--replay-report-frac", type=float, default=0.25)
+            s.add_argument("--labels-from", type=Path, default=None,
+                           help="m1_choices.json from `boolintro.tiny.crossmodel record`: train the new "
+                                "characters on those recorded choices instead of their rules")
             s.add_argument("--no-reinit", action="store_true",
                            help="keep the new characters' (never trained) initial embeddings")
     args = p.parse_args(argv)
@@ -180,11 +187,12 @@ def pretrain(args):
     (out / "config.json").write_text(json.dumps({k: str(v) if isinstance(v, Path) else v
                                                  for k, v in vars(args).items()}, indent=1))
     dev = M.device_of(args.device)
+    mseed = args.seed if args.model_seed is None else args.model_seed
     model = M.make_model(D.vocab_size(spec), args.n_layer, args.n_embd, args.n_head, args.dropout,
-                         seed=args.seed).to(dev)
+                         seed=mseed).to(dev)
     print(f"model: {sum(p.numel() for p in model.parameters()) / 1e6:.2f}M params on {dev}", flush=True)
     sampler = D.Sampler(spec, D.ids_of(spec, ("pre_report", "pre_choice")),
-                        D.ids_of(spec, ("pre_report",)), seed=args.seed + 1, kinds=D.report_kinds(spec))
+                        D.ids_of(spec, ("pre_report",)), seed=mseed + 1, kinds=D.report_kinds(spec))
     next_batch = lambda: D.collate(sampler.batch(args.batch_size, args.report_frac), dev)  # noqa: E731
     train_loop(model, list(model.parameters()), next_batch, spec, dev, args, out)
     M.save(model, out / "model")
@@ -228,7 +236,12 @@ def finetune(args):
     print(f"finetune {args.train}: {sum(p.numel() for p in params) / 1e6:.2f}M trainable "
           f"({len(new_ids)} new characters), replay={args.replay}", flush=True)
 
-    new_s = D.Sampler(spec, new_ids, [], seed=args.seed + 11)
+    prefer = None
+    if args.labels_from is not None:
+        from .crossmodel import load_preferences
+        prefer = load_preferences(args.labels_from, spec)
+        print(f"labels: recorded choices from {args.labels_from} (not the rules)", flush=True)
+    new_s = D.Sampler(spec, new_ids, [], seed=args.seed + 11, prefer=prefer)
     rep_s = None
     if args.replay > 0:
         rep_s = D.Sampler(spec, D.ids_of(spec, ("pre_report", "pre_choice")),
