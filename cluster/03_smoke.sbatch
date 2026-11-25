@@ -19,8 +19,6 @@
 #SBATCH --time=00:45:00
 #SBATCH --output=logs/bi-smoke-%j.out
 #SBATCH --error=logs/bi-smoke-%j.err
-#SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=kk6081@nyu.edu
 set -euo pipefail
 source "${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}/cluster/job_common.sh"
 SMOKE_DIR="$RUNS_ROOT/smoke_$SLURM_JOB_ID"

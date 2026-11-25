@@ -26,8 +26,6 @@
 #SBATCH --time=6:00:00
 #SBATCH --output=logs/bi-sweep-%A_%a.out
 #SBATCH --error=logs/bi-sweep-%A_%a.err
-#SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=kk6081@nyu.edu
 set -euo pipefail
 source "${REPO:-${SLURM_SUBMIT_DIR:-$PWD}}/cluster/job_common.sh"
 read -r -a NARR <<< "${NS:-0 10 30 100 300 1000}"

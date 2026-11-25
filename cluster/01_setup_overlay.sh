@@ -4,7 +4,7 @@
 # Skip this if the probe_conf overlay exists (the default in env.sh).
 #
 #   source /scratch/$USER/intros/cluster/env.sh
-#   export OVERLAY=/scratch/$USER/intros_overlay-15GB-500K.ext3   # and add to env.sh
+#   export OVERLAY=/scratch/$USER/intros_overlay-15GB-500K.ext3   # env.sh falls back to this path
 #   srun --account="$TORCH_ACCOUNT" --cpus-per-task=4 --mem=16GB --time=02:00:00 --pty /bin/bash
 #   cp -rp "$OVERLAY_SRC" "$OVERLAY.gz" && gunzip -f "$OVERLAY.gz"
 #   apptainer exec --fakeroot --overlay "$OVERLAY:rw" "$SIF" /bin/bash
