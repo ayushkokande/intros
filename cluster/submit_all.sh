@@ -15,7 +15,7 @@ cd "$REPO"
 mkdir -p logs
 ARRAY="${ARRAY-1-4}"
 ARR=(); [ -n "$ARRAY" ] && ARR=(--array="$ARRAY")
-COMMON=(--parsable --account="$TORCH_ACCOUNT" --chdir="$REPO" --export=ALL)
+COMMON=(--parsable --account="$TORCH_ACCOUNT" --chdir="$REPO" --export=ALL "${SBATCH_MAIL[@]}")
 
 TRAIN=$(sbatch "${COMMON[@]}" "${ARR[@]}" cluster/10_train.sbatch)
 DEP="afterok:$TRAIN"; [ -n "$ARRAY" ] && DEP="aftercorr:$TRAIN"

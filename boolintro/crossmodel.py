@@ -39,7 +39,18 @@ Steps (one experiment directory per self model and level):
     python -m boolintro.crossmodel summarize --exps runs/xm/* --out runs/xm/summary
 
 `evaluate` loads one model at a time and saves raw outputs (raw_m1.json, raw_m2_<condition>.json),
-so reruns skip finished work.  boolintro.tiny.crossmodel writes the same
+so reruns skip finished work.
+
+`evaluate --prefill` starts every report answer (self and third person, M1 and M2) with
+REPORT_PREFILL, so a fine-tuned model cannot answer the report prompt with a decision ("A",
+"B: pool: yes ...").  Decisions are unaffected (they use the decision prompt).  Results go to
+the condition "<condition>-prefill" (raw_m1_prefill.json, raw_m2_<condition>-prefill.json,
+crossmodel_eval_<condition>-prefill.json), next to the default run.
+
+`evaluate --m2-step N` uses the outsider's checkpoint at step N instead of its last one (for an
+outsider that overfits into answering every prompt with a decision letter).  M1 stays at its
+recorded step, so M1's saved reports are reused.  Results go to "<condition>-stepN" (with
+--prefill, "<condition>-stepN-prefill").  boolintro.tiny.crossmodel writes the same
 crossmodel_eval_<condition>.json files for the from-scratch GPT-2, so `summarize` works for both.
 """
 
@@ -57,6 +68,10 @@ import numpy as np
 from . import data, metrics, rules
 
 REPORT_SETS = ("m1_self", "m1_third", "m2_self", "m2_third")
+# Start of the assistant turn for report prompts with `evaluate --prefill`.  Content-free (no
+# attribute or operator), the same for every model and report kind.  Off by default, so the
+# default protocol matches boolintro.evaluate.
+REPORT_PREFILL = "Formula:"
 SET_KEYS = ("parse_rate", "faithfulness", "report_target_agreement", "exact_match",
             "error_faithfulness")
 
@@ -156,15 +171,15 @@ def record(args):
 
 
 # --------------------------------------------------------------------------- evaluate
-def _report_texts(tok, chars, n_reports, seed):
+def _report_texts(tok, chars, n_reports, seed, prefill: str = ""):
     from . import modeling, prompts
 
     texts = {"self": [], "third": []}
     owners = []
     for ci, c in enumerate(chars):
         for a, b in data.report_contexts(c, n_reports, seed):
-            texts["self"].append(modeling.render(tok, prompts.report_user(c, a, b)))
-            texts["third"].append(modeling.render(tok, prompts.third_person_user(c, a, b)))
+            texts["self"].append(modeling.render(tok, prompts.report_user(c, a, b)) + prefill)
+            texts["third"].append(modeling.render(tok, prompts.third_person_user(c, a, b)) + prefill)
             owners.append(ci)
     return texts, owners
 
@@ -173,7 +188,8 @@ def _run_model(role, model, tok, chars, spec, args, seed_offset):
     from . import modeling
     from .evaluate import decisions
 
-    texts, owners = _report_texts(tok, chars, args.n_reports, spec["seed"])
+    prefill = REPORT_PREFILL if args.prefill else ""
+    texts, owners = _report_texts(tok, chars, args.n_reports, spec["seed"], prefill)
     out = {"p_first": decisions(model, tok, chars, [[tuple(p) for p in c["eval_pairs"]] for c in chars],
                                 args.batch_size)}
     for kind in ("self", "third") if not args.no_third_person else ("self",):
@@ -238,12 +254,20 @@ def evaluate(args):
     if json.loads((m2_run / "spec.json").read_text())["characters"] != spec["characters"]:
         raise SystemExit(f"{m2_run} uses a different spec from {exp}")
     cond = condition_name(rec["model"], m2_cfg["model"], args.condition)
-    m2_step = _final_step(m2_run, "final")
+    sfx = "_prefill" if args.prefill else ""
+    m2_step = _final_step(m2_run, args.m2_step)
+    if not args.condition:
+        if args.m2_step != "final":
+            cond += f"-step{m2_step}"
+        if args.prefill:
+            cond += "-prefill"
     cfg = {"n_reports": args.n_reports, "temperature": args.temperature, "gen_seed": args.seed,
            "char_limit": args.char_limit, "third_person": not args.no_third_person}
+    if args.prefill:
+        cfg["report_prefill"] = REPORT_PREFILL
 
     jobs = {"m1": (rec["model"], args.quant or rec["quant"],
-                   Path(rec["m1_run"]) / "checkpoints" / f"step_{rec['step']:06d}", 0, exp / "raw_m1.json"),
+                   Path(rec["m1_run"]) / "checkpoints" / f"step_{rec['step']:06d}", 0, exp / f"raw_m1{sfx}.json"),
             "m2": (m2_cfg["model"], args.quant or m2_cfg.get("quant", "none"),
                    m2_run / "checkpoints" / f"step_{m2_step:06d}", 104729, exp / f"raw_m2_{cond}.json")}
     raw = {}
@@ -482,6 +506,12 @@ def get_args(argv=None):
     e.add_argument("--gen-batch-size", type=int, default=48)
     e.add_argument("--char-limit", type=int, default=0)
     e.add_argument("--no-third-person", action="store_true")
+    e.add_argument("--prefill", action="store_true",
+                   help=f"start every report answer with {REPORT_PREFILL!r}; results go to condition "
+                        "'<condition>-prefill'")
+    e.add_argument("--m2-step", default="final",
+                   help="the outsider's checkpoint step (default: its last); any other step goes to "
+                        "condition '<condition>-step<N>'")
     e.add_argument("--quant", choices=["none", "8bit", "4bit"], default=None)
     e.add_argument("--seed", type=int, default=0)
     s = sub.add_parser("summarize", help="gap per level over seeds")

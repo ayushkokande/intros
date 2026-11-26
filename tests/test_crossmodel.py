@@ -99,9 +99,40 @@ def test_crossmodel_end_to_end(tmp_path):
                   "m1_third_report_target_agreement"):
             assert k in row
     crossmodel.main(eval_args)  # rerun reuses the saved raw outputs
+    # --prefill: separate raw files and condition; the default results stay untouched.
+    before = (exp / "raw_m1.json").read_text()
+    crossmodel.main(eval_args + ["--prefill"])
+    assert (exp / "raw_m1.json").read_text() == before
+    raw_pf = json.loads((exp / "raw_m1_prefill.json").read_text())
+    assert raw_pf["config"]["report_prefill"] == crossmodel.REPORT_PREFILL
+    out = json.loads((exp / "crossmodel_eval_other-prefill.json").read_text())
+    assert out["condition"] == "other-prefill" and out["report_prefill"] == crossmodel.REPORT_PREFILL
+    # --m2-step: an earlier outsider checkpoint, its own condition; M1's raw outputs are reused.
+    crossmodel.main(eval_args + ["--m2-step", "2"])
+    assert (exp / "raw_m1.json").read_text() == before
+    out = json.loads((exp / "crossmodel_eval_other-step2.json").read_text())
+    assert out["condition"] == "other-step2" and out["m2"].endswith("step_000002")
+    assert json.loads((exp / "crossmodel_eval_other.json").read_text())["m2"].endswith("step_000004")
+    with pytest.raises(SystemExit):
+        crossmodel.main(eval_args + ["--m2-step", "3"])
     crossmodel.main(["summarize", "--exps", str(exp), "--out", str(tmp_path / "summary")])
     report = (tmp_path / "summary" / "report.md").read_text()
-    assert "(same)" in report and "(other)" in report
+    assert "(same)" in report and "(other)" in report and "(other-prefill)" in report
+    assert "(other-step2)" in report
+
+
+def test_report_texts_prefill():
+    class Tok:
+        def apply_chat_template(self, msgs, **kw):
+            return "<user>" + msgs[-1]["content"] + "<assistant>"
+
+    chars = data.build_spec(2, (1,), seed=0)["characters"]
+    plain, owners = crossmodel._report_texts(Tok(), chars, 3, 0)
+    pf, owners_pf = crossmodel._report_texts(Tok(), chars, 3, 0, crossmodel.REPORT_PREFILL)
+    assert owners == owners_pf and len(plain["self"]) == len(plain["third"]) == 6
+    for kind in ("self", "third"):
+        assert all(p.endswith("<assistant>") for p in plain[kind])
+        assert [p + crossmodel.REPORT_PREFILL for p in plain[kind]] == pf[kind]
 
 
 def test_tiny_crossmodel_end_to_end(tmp_path):

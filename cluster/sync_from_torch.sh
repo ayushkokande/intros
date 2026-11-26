@@ -4,7 +4,8 @@
 #   WITH_CHECKPOINTS=1 bash cluster/sync_from_torch.sh   # also adapters (~0.5 GB each for 32B)
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC="${SRC:-kk6081@dtn.torch.hpc.nyu.edu:/scratch/kk6081/intros_runs/}"
+TORCH_USER="${TORCH_USER:-$USER}"   # your NYU NetID
+SRC="${SRC:-$TORCH_USER@dtn.torch.hpc.nyu.edu:/scratch/$TORCH_USER/intros_runs/}"
 DEST="${DEST:-$(dirname "$HERE")/runs/}"
 OPTS=(-avz --progress)
 [ "${WITH_CHECKPOINTS:-0}" = "1" ] || OPTS+=(--exclude 'checkpoints/' --exclude 'resume/')

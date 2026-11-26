@@ -5,6 +5,9 @@
 
 # Slurm account from `my_slurm_accounts` (required for every job).
 export TORCH_ACCOUNT="${TORCH_ACCOUNT:-torch_pr_1363_cds}"
+# Job e-mails (END/FAIL) go here when set, e.g. export MAIL_USER=netid@nyu.edu.
+export MAIL_USER="${MAIL_USER:-}"
+SBATCH_MAIL=(); [ -n "$MAIL_USER" ] && SBATCH_MAIL=(--mail-type=END,FAIL --mail-user="$MAIL_USER")
 
 # Code location (jobs use $SLURM_SUBMIT_DIR when submitted with --chdir).
 export REPO="${REPO:-/scratch/$USER/intros}"
@@ -24,7 +27,11 @@ export TMPDIR="/scratch/$USER/tmp"
 # has torch, transformers, safetensors, pandas, matplotlib and pytest, which is all
 # this project needs.  Jobs mount it read-only, so sharing is safe.  To build a
 # separate one, set OVERLAY to a new path and run cluster/01_setup_overlay.sh.
-export OVERLAY="${OVERLAY:-/scratch/$USER/section33_overlay-15GB-500K.ext3}"
+if [ -z "${OVERLAY:-}" ]; then
+  OVERLAY=/scratch/$USER/section33_overlay-15GB-500K.ext3
+  [ -f "$OVERLAY" ] || OVERLAY=/scratch/$USER/intros_overlay-15GB-500K.ext3   # built by 01_setup_overlay.sh
+fi
+export OVERLAY
 export SIF="${SIF:-/share/apps/images/cuda12.3.2-cudnn9.0.0-ubuntu-22.04.4.sif}"
 export OVERLAY_SRC="/share/apps/overlay-fs-ext3/overlay-15GB-500K.ext3.gz"
 
