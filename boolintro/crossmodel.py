@@ -45,7 +45,12 @@ so reruns skip finished work.
 REPORT_PREFILL, so a fine-tuned model cannot answer the report prompt with a decision ("A",
 "B: pool: yes ...").  Decisions are unaffected (they use the decision prompt).  Results go to
 the condition "<condition>-prefill" (raw_m1_prefill.json, raw_m2_<condition>-prefill.json,
-crossmodel_eval_<condition>-prefill.json), next to the default run.  boolintro.tiny.crossmodel writes the same
+crossmodel_eval_<condition>-prefill.json), next to the default run.
+
+`evaluate --m2-step N` uses the outsider's checkpoint at step N instead of its last one (for an
+outsider that overfits into answering every prompt with a decision letter).  M1 stays at its
+recorded step, so M1's saved reports are reused.  Results go to "<condition>-stepN" (with
+--prefill, "<condition>-stepN-prefill").  boolintro.tiny.crossmodel writes the same
 crossmodel_eval_<condition>.json files for the from-scratch GPT-2, so `summarize` works for both.
 """
 
@@ -250,9 +255,12 @@ def evaluate(args):
         raise SystemExit(f"{m2_run} uses a different spec from {exp}")
     cond = condition_name(rec["model"], m2_cfg["model"], args.condition)
     sfx = "_prefill" if args.prefill else ""
-    if args.prefill and not args.condition:
-        cond += "-prefill"
-    m2_step = _final_step(m2_run, "final")
+    m2_step = _final_step(m2_run, args.m2_step)
+    if not args.condition:
+        if args.m2_step != "final":
+            cond += f"-step{m2_step}"
+        if args.prefill:
+            cond += "-prefill"
     cfg = {"n_reports": args.n_reports, "temperature": args.temperature, "gen_seed": args.seed,
            "char_limit": args.char_limit, "third_person": not args.no_third_person}
     if args.prefill:
@@ -501,6 +509,9 @@ def get_args(argv=None):
     e.add_argument("--prefill", action="store_true",
                    help=f"start every report answer with {REPORT_PREFILL!r}; results go to condition "
                         "'<condition>-prefill'")
+    e.add_argument("--m2-step", default="final",
+                   help="the outsider's checkpoint step (default: its last); any other step goes to "
+                        "condition '<condition>-step<N>'")
     e.add_argument("--quant", choices=["none", "8bit", "4bit"], default=None)
     e.add_argument("--seed", type=int, default=0)
     s = sub.add_parser("summarize", help="gap per level over seeds")

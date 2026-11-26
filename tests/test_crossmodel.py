@@ -107,9 +107,18 @@ def test_crossmodel_end_to_end(tmp_path):
     assert raw_pf["config"]["report_prefill"] == crossmodel.REPORT_PREFILL
     out = json.loads((exp / "crossmodel_eval_other-prefill.json").read_text())
     assert out["condition"] == "other-prefill" and out["report_prefill"] == crossmodel.REPORT_PREFILL
+    # --m2-step: an earlier outsider checkpoint, its own condition; M1's raw outputs are reused.
+    crossmodel.main(eval_args + ["--m2-step", "2"])
+    assert (exp / "raw_m1.json").read_text() == before
+    out = json.loads((exp / "crossmodel_eval_other-step2.json").read_text())
+    assert out["condition"] == "other-step2" and out["m2"].endswith("step_000002")
+    assert json.loads((exp / "crossmodel_eval_other.json").read_text())["m2"].endswith("step_000004")
+    with pytest.raises(SystemExit):
+        crossmodel.main(eval_args + ["--m2-step", "3"])
     crossmodel.main(["summarize", "--exps", str(exp), "--out", str(tmp_path / "summary")])
     report = (tmp_path / "summary" / "report.md").read_text()
     assert "(same)" in report and "(other)" in report and "(other-prefill)" in report
+    assert "(other-step2)" in report
 
 
 def test_report_texts_prefill():
